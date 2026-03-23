@@ -1,0 +1,6 @@
+{
+    "name": "EditMode",
+    "optionalUnityReferences": [
+        "TestAssemblies"
+    ]
+}

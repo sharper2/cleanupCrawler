@@ -1,0 +1,9 @@
+{
+    "name": "DungeonGenerator.Tests",
+    "references": [
+        "DungeonGenerator.Runtime"
+    ],
+    "optionalUnityReferences": [
+        "TestAssemblies"
+    ]
+}
