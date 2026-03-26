@@ -31,17 +31,27 @@ namespace DungeonGenerator
 
         private void PlaceRooms(DungeonGraph graph)
         {
-            int targetRooms = _rng.Next(_settings.minRooms, _settings.maxRooms + 1);
+            if (_settings.gridSize.x <= 0 || _settings.gridSize.y <= 0)
+                return;
+
+            int minRooms = Mathf.Max(1, Mathf.Min(_settings.minRooms, _settings.maxRooms));
+            int maxRooms = Mathf.Max(minRooms, _settings.maxRooms);
+            int targetRooms = _rng.Next(minRooms, maxRooms + 1);
             int maxAttempts = targetRooms * 10;
             int attempts = 0;
+
+            int minRoomWidth = Mathf.Clamp(_settings.minRoomSize.x, 1, _settings.gridSize.x);
+            int maxRoomWidth = Mathf.Clamp(_settings.maxRoomSize.x, minRoomWidth, _settings.gridSize.x);
+            int minRoomHeight = Mathf.Clamp(_settings.minRoomSize.y, 1, _settings.gridSize.y);
+            int maxRoomHeight = Mathf.Clamp(_settings.maxRoomSize.y, minRoomHeight, _settings.gridSize.y);
 
             while (graph.NodeCount < targetRooms && attempts < maxAttempts)
             {
                 attempts++;
 
                 Vector2Int size = new Vector2Int(
-                    _rng.Next(_settings.minRoomSize.x, _settings.maxRoomSize.x + 1),
-                    _rng.Next(_settings.minRoomSize.y, _settings.maxRoomSize.y + 1)
+                    _rng.Next(minRoomWidth, maxRoomWidth + 1),
+                    _rng.Next(minRoomHeight, maxRoomHeight + 1)
                 );
 
                 Vector2Int position = new Vector2Int(
