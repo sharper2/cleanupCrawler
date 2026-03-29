@@ -34,6 +34,14 @@ namespace DungeonGenerator
         public Material floorMaterial;
         public Material wallMaterial;
 
+        [Header("Floor Items")]
+        public List<GameObject> floorItemPrefabs = new List<GameObject>();
+        public int minFloorItemsPerRoom = 0;
+        public int maxFloorItemsPerRoom = 2;
+        public int minFloorItemsPerCorridor = 0;
+        public int maxFloorItemsPerCorridor = 1;
+        public float floorItemYOffset = 0.5f;
+
         [Header("Fallback Colors")]
         public Color fallbackFloorColor = new Color(0.3f, 0.3f, 0.35f, 1f);
         public Color fallbackCorridorColor = new Color(0.5f, 0.7f, 0.55f, 1f);
@@ -116,6 +124,7 @@ namespace DungeonGenerator
             var roomCells = BuildRoomCells(graph);
             CreateFloorObjects(floorCells, roomCells);
             CreateWallObjects(floorCells);
+            CreateFloorItemObjects(graph, floorCells, roomCells);
         }
 
         public void ClearDungeon()
@@ -136,6 +145,133 @@ namespace DungeonGenerator
                 else
                     DestroyImmediate(child);
             }
+        }
+
+        private void CreateFloorItemObjects(DungeonGraph graph, HashSet<Vector2Int> floorCells, HashSet<Vector2Int> roomCells)
+        {
+            if (graph == null || floorCells == null || floorCells.Count == 0 || roomCells == null)
+                return;
+
+            if (floorItemPrefabs == null || floorItemPrefabs.Count == 0)
+                return;
+
+            var validPrefabs = new List<GameObject>();
+            for (int i = 0; i < floorItemPrefabs.Count; i++)
+            {
+                if (floorItemPrefabs[i] != null)
+                    validPrefabs.Add(floorItemPrefabs[i]);
+            }
+
+            if (validPrefabs.Count == 0)
+                return;
+
+            var usedCells = new HashSet<Vector2Int>();
+
+            foreach (var node in graph.Nodes)
+            {
+                var roomCandidateCells = new List<Vector2Int>();
+
+                for (int x = node.GridPosition.x; x < node.GridPosition.x + node.Size.x; x++)
+                {
+                    for (int y = node.GridPosition.y; y < node.GridPosition.y + node.Size.y; y++)
+                    {
+                        var cell = new Vector2Int(x, y);
+                        if (_hasStartCell && cell == _lastStartCell)
+                            continue;
+                        if (usedCells.Contains(cell))
+                            continue;
+
+                        roomCandidateCells.Add(cell);
+                    }
+                }
+
+                SpawnItemsOnCells(roomCandidateCells, minFloorItemsPerRoom, maxFloorItemsPerRoom, validPrefabs, usedCells);
+            }
+
+            var corridorCandidateCellsByEdge = BuildCorridorCellGroups(graph, roomCells);
+            for (int i = 0; i < corridorCandidateCellsByEdge.Count; i++)
+            {
+                var corridorCells = corridorCandidateCellsByEdge[i];
+                corridorCells.RemoveAll(cell => usedCells.Contains(cell) || (_hasStartCell && cell == _lastStartCell));
+                SpawnItemsOnCells(corridorCells, minFloorItemsPerCorridor, maxFloorItemsPerCorridor, validPrefabs, usedCells);
+            }
+        }
+
+        private void SpawnItemsOnCells(List<Vector2Int> candidateCells, int minCount, int maxCount, List<GameObject> validPrefabs, HashSet<Vector2Int> usedCells)
+        {
+            if (candidateCells == null || candidateCells.Count == 0)
+                return;
+
+            int clampedMin = Mathf.Max(0, minCount);
+            int clampedMax = Mathf.Max(clampedMin, maxCount);
+            int desiredCount = Mathf.Clamp(Random.Range(clampedMin, clampedMax + 1), 0, candidateCells.Count);
+
+            for (int i = 0; i < desiredCount && candidateCells.Count > 0; i++)
+            {
+                int cellIndex = Random.Range(0, candidateCells.Count);
+                Vector2Int cell = candidateCells[cellIndex];
+                candidateCells.RemoveAt(cellIndex);
+                usedCells.Add(cell);
+
+                var prefab = validPrefabs[Random.Range(0, validPrefabs.Count)];
+                CreateFloorItemObject(cell, prefab);
+            }
+        }
+
+        private List<List<Vector2Int>> BuildCorridorCellGroups(DungeonGraph graph, HashSet<Vector2Int> roomCells)
+        {
+            var corridorGroups = new List<List<Vector2Int>>();
+            var uniqueEdges = new HashSet<string>();
+
+            foreach (var node in graph.Nodes)
+            {
+                foreach (var edge in graph.GetEdgesForNode(node.ID))
+                {
+                    string otherID = edge.GetOtherNodeID(node.ID);
+                    if (otherID == null)
+                        continue;
+
+                    string a = string.CompareOrdinal(node.ID, otherID) <= 0 ? node.ID : otherID;
+                    string b = string.CompareOrdinal(node.ID, otherID) <= 0 ? otherID : node.ID;
+                    string key = a + "|" + b;
+
+                    if (!uniqueEdges.Add(key))
+                        continue;
+
+                    DungeonNode other = graph.GetNodeByID(otherID);
+                    if (other == null)
+                        continue;
+
+                    Vector2Int from = GetNodeCenterCell(node);
+                    Vector2Int to = GetNodeCenterCell(other);
+
+                    var corridorCells = new HashSet<Vector2Int>();
+                    AddCorridorCellsLShaped(corridorCells, from, to);
+
+                    var filteredCells = new List<Vector2Int>();
+                    foreach (var cell in corridorCells)
+                    {
+                        if (!roomCells.Contains(cell))
+                            filteredCells.Add(cell);
+                    }
+
+                    if (filteredCells.Count > 0)
+                        corridorGroups.Add(filteredCells);
+                }
+            }
+
+            return corridorGroups;
+        }
+
+        private void CreateFloorItemObject(Vector2Int cell, GameObject prefab)
+        {
+            if (prefab == null)
+                return;
+
+            var instance = Instantiate(prefab, _generatedRoot);
+
+            instance.name = "FloorItem_" + cell.x + "_" + cell.y;
+            instance.transform.position = CellCenterToWorld(cell, floorItemYOffset);
         }
 
         public bool IsCellWalkable(Vector2Int cell)

@@ -13,19 +13,31 @@ namespace DungeonGenerator
         public float turnDuration = 0.08f;
         public float yOffset = 0.5f;
         public bool snapToStartOnPlay = true;
+        public bool forceKinematicRigidbody = true;
+        public Transform gridAnchor;
 
         private bool _isMoving;
         private bool _isTurning;
         private bool _hasAttemptedAutoBuild;
+        private bool _hasCurrentCell;
         private Vector2Int _currentCell;
         private Vector2Int _queuedMove;
         private int _queuedTurn;
         private Vector2Int _facing = Vector2Int.up;
+        private Rigidbody _rigidbody;
 
         private void Awake()
         {
             if (dungeonBuilder == null)
                 dungeonBuilder = FindFirstObjectByType<DungeonBasic3DBuilder>();
+
+            _rigidbody = GetComponent<Rigidbody>();
+            if (_rigidbody != null && forceKinematicRigidbody)
+            {
+                _rigidbody.isKinematic = true;
+                _rigidbody.useGravity = false;
+                _rigidbody.interpolation = RigidbodyInterpolation.None;
+            }
         }
 
         private void Start()
@@ -49,6 +61,13 @@ namespace DungeonGenerator
             if (!EnsureDungeonReady(false))
                 return;
 
+            if (!_hasCurrentCell && !ResolveCurrentCell())
+                return;
+
+            SnapToTrackedCell();
+            TryCollectFloorItemAtCurrentCell();
+            CaptureInput();
+
             if (_queuedTurn != 0)
             {
                 StartCoroutine(TurnRoutine(_queuedTurn));
@@ -64,14 +83,40 @@ namespace DungeonGenerator
 
             Vector2Int direction = ToWorldDirection(localMove);
 
-            if (!ResolveCurrentCell())
-                return;
-
             Vector2Int targetCell = _currentCell + direction;
-            if (!dungeonBuilder.IsCellWalkable(targetCell) || HasWallAtCell(targetCell))
+            if (!dungeonBuilder.IsCellWalkable(targetCell) || HasWallAtCell(targetCell) || HasEnemyAtCell(targetCell))
                 return;
 
             StartCoroutine(MoveToCell(targetCell));
+        }
+
+        private void CaptureInput()
+        {
+            if (Input.GetKeyDown(KeyCode.Q) || Input.GetKeyDown(KeyCode.LeftArrow))
+            {
+                _queuedTurn = -1;
+            }
+            else if (Input.GetKeyDown(KeyCode.E) || Input.GetKeyDown(KeyCode.RightArrow))
+            {
+                _queuedTurn = 1;
+            }
+
+            if (Input.GetKey(KeyCode.W) || Input.GetKey(KeyCode.UpArrow))
+            {
+                _queuedMove = Vector2Int.up;
+            }
+            else if (Input.GetKey(KeyCode.S) || Input.GetKey(KeyCode.DownArrow))
+            {
+                _queuedMove = Vector2Int.down;
+            }
+            else if (Input.GetKey(KeyCode.A))
+            {
+                _queuedMove = Vector2Int.left;
+            }
+            else if (Input.GetKey(KeyCode.D))
+            {
+                _queuedMove = Vector2Int.right;
+            }
         }
 
         [ContextMenu("Snap To Dungeon Start")]
@@ -83,42 +128,22 @@ namespace DungeonGenerator
             EnsureDungeonReady(true);
 
             if (dungeonBuilder.TryGetStartCell(out _currentCell))
-                transform.position = dungeonBuilder.CellCenterToWorld(_currentCell, yOffset);
+            {
+                SetAnchorWorldPosition(dungeonBuilder.CellCenterToWorld(_currentCell, yOffset));
+                _hasCurrentCell = true;
+            }
             else
                 ResolveCurrentCell();
         }
 
-        private void OnGUI()
+        private void SnapToTrackedCell()
         {
-            Event e = Event.current;
-            if (e == null || e.type != EventType.KeyDown)
+            if (!_hasCurrentCell || dungeonBuilder == null)
                 return;
 
-            switch (e.keyCode)
-            {
-                case KeyCode.W:
-                case KeyCode.UpArrow:
-                    _queuedMove = Vector2Int.up;
-                    break;
-                case KeyCode.S:
-                case KeyCode.DownArrow:
-                    _queuedMove = Vector2Int.down;
-                    break;
-                case KeyCode.A:
-                    _queuedMove = Vector2Int.left;
-                    break;
-                case KeyCode.D:
-                    _queuedMove = Vector2Int.right;
-                    break;
-                case KeyCode.Q:
-                case KeyCode.LeftArrow:
-                    _queuedTurn = -1;
-                    break;
-                case KeyCode.E:
-                case KeyCode.RightArrow:
-                    _queuedTurn = 1;
-                    break;
-            }
+            Vector3 snappedPosition = dungeonBuilder.CellCenterToWorld(_currentCell, yOffset);
+            if ((GetAnchorWorldPosition() - snappedPosition).sqrMagnitude > 0.0001f)
+                SetAnchorWorldPosition(snappedPosition);
         }
 
         private Vector2Int ToWorldDirection(Vector2Int localMove)
@@ -145,12 +170,12 @@ namespace DungeonGenerator
                 yield return null;
             }
 
-            transform.rotation = end;
-
             if (direction < 0)
                 _facing = new Vector2Int(-_facing.y, _facing.x);
             else
                 _facing = new Vector2Int(_facing.y, -_facing.x);
+
+            ApplyFacingRotation();
 
             _isTurning = false;
         }
@@ -163,6 +188,23 @@ namespace DungeonGenerator
 
             string wallName = "Wall_" + cell.x + "_" + cell.y;
             return generatedRoot.Find(wallName) != null;
+        }
+
+        private static bool HasEnemyAtCell(Vector2Int cell)
+        {
+            return StaticEnemy.IsCellOccupied(cell);
+        }
+
+        private void TryCollectFloorItemAtCurrentCell()
+        {
+            if (!_hasCurrentCell)
+                return;
+
+            while (FloorItemRegistry.TryGetItemAtCell(_currentCell, out IFloorItem floorItem))
+            {
+                if (floorItem == null || !floorItem.TryCollect(gameObject))
+                    break;
+            }
         }
 
         private void ApplyFacingRotation()
@@ -210,27 +252,60 @@ namespace DungeonGenerator
             if (dungeonBuilder == null)
                 return false;
 
-            return dungeonBuilder.TryWorldToCell(transform.position, out _currentCell);
+            bool resolved = dungeonBuilder.TryWorldToCell(GetAnchorWorldPosition(), out _currentCell);
+            _hasCurrentCell = resolved;
+            return resolved;
         }
 
         private IEnumerator MoveToCell(Vector2Int targetCell)
         {
             _isMoving = true;
 
-            Vector3 start = transform.position;
+            Vector3 start = GetAnchorWorldPosition();
             Vector3 end = dungeonBuilder.CellCenterToWorld(targetCell, yOffset);
             float duration = Mathf.Max(0.01f, moveDuration);
 
             for (float elapsed = 0f; elapsed < duration; elapsed += Time.deltaTime)
             {
                 float t = Mathf.Clamp01(elapsed / duration);
-                transform.position = Vector3.Lerp(start, end, t);
+                SetAnchorWorldPosition(Vector3.Lerp(start, end, t));
                 yield return null;
             }
 
-            transform.position = end;
+            SetAnchorWorldPosition(end);
             _currentCell = targetCell;
+            _hasCurrentCell = true;
             _isMoving = false;
+        }
+
+        private Vector3 GetAnchorWorldPosition()
+        {
+            return gridAnchor != null ? gridAnchor.position : GetWorldPosition();
+        }
+
+        private void SetAnchorWorldPosition(Vector3 anchorWorldPosition)
+        {
+            if (gridAnchor == null)
+            {
+                SetWorldPosition(anchorWorldPosition);
+                return;
+            }
+
+            Vector3 delta = anchorWorldPosition - gridAnchor.position;
+            SetWorldPosition(GetWorldPosition() + delta);
+        }
+
+        private Vector3 GetWorldPosition()
+        {
+            return _rigidbody != null ? _rigidbody.position : transform.position;
+        }
+
+        private void SetWorldPosition(Vector3 position)
+        {
+            if (_rigidbody != null)
+                _rigidbody.position = position;
+            else
+                transform.position = position;
         }
     }
 }

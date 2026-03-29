@@ -30,6 +30,9 @@ public class InventoryHudController : MonoBehaviour
     private InventoryItemInstance _draggedItem;
     private Vector2Int _draggedFromOrigin;
     private bool _dragHasPreviousOrigin;
+    private Vector2Int _dragMouseToOriginCellOffset;
+    private Vector2 _dragMouseToOriginPixelOffset;
+    private bool _cursorWasVisibleBeforeDrag;
 
     private bool _isHoveringGrid;
     private Vector2Int _hoveredOrigin;
@@ -39,24 +42,42 @@ public class InventoryHudController : MonoBehaviour
 
     private void Awake()
     {
-        var width = Mathf.Max(1, gridSize.x);
-        var height = Mathf.Max(1, gridSize.y);
-        _grid = new InventoryGridData(width, height);
+        EnsureGridInitialized();
 
         for (var i = 0; i < startingItems.Count; i++)
         {
-            var definition = startingItems[i];
-            if (definition == null)
-            {
-                continue;
-            }
-
-            var instance = new InventoryItemInstance(definition);
-            if (_grid.TryFindFirstFit(instance, out var origin))
-            {
-                _grid.TryPlaceItem(instance, origin);
-            }
+            TryAddItem(startingItems[i]);
         }
+    }
+
+    public bool TryAddItem(InventoryItemDefinition definition)
+    {
+        if (definition == null)
+        {
+            return false;
+        }
+
+        EnsureGridInitialized();
+
+        var instance = new InventoryItemInstance(definition);
+        if (!_grid.TryFindFirstFit(instance, out var origin))
+        {
+            return false;
+        }
+
+        return _grid.TryPlaceItem(instance, origin);
+    }
+
+    private void EnsureGridInitialized()
+    {
+        if (_grid != null)
+        {
+            return;
+        }
+
+        var width = Mathf.Max(1, gridSize.x);
+        var height = Mathf.Max(1, gridSize.y);
+        _grid = new InventoryGridData(width, height);
     }
 
     private void Update()
@@ -64,6 +85,11 @@ public class InventoryHudController : MonoBehaviour
         if (GetToggleKeyDown())
         {
             _isVisible = !_isVisible;
+
+            if (!_isVisible && _draggedItem != null)
+            {
+                CancelDragToPreviousPosition();
+            }
         }
 
         if (!_isVisible)
@@ -126,6 +152,14 @@ public class InventoryHudController : MonoBehaviour
 
         _draggedItem = selectedItem;
         _dragHasPreviousOrigin = _grid.TryGetOrigin(selectedItem, out _draggedFromOrigin);
+
+        var itemOriginCell = _dragHasPreviousOrigin ? _draggedFromOrigin : cell;
+        _dragMouseToOriginCellOffset = cell - itemOriginCell;
+        _dragMouseToOriginPixelOffset = CellToPixelPosition(itemOriginCell) - mousePosition;
+
+        _cursorWasVisibleBeforeDrag = Cursor.visible;
+        Cursor.visible = false;
+
         _grid.RemoveItem(selectedItem);
 
         UpdateHoveredPlacement();
@@ -144,6 +178,26 @@ public class InventoryHudController : MonoBehaviour
             _grid.TryPlaceItem(_draggedItem, _draggedFromOrigin);
         }
 
+        Cursor.visible = _cursorWasVisibleBeforeDrag;
+        _draggedItem = null;
+        _dragHasPreviousOrigin = false;
+        _isHoveringGrid = false;
+        _canDropAtHover = false;
+    }
+
+    private void CancelDragToPreviousPosition()
+    {
+        if (_draggedItem == null)
+        {
+            return;
+        }
+
+        if (_dragHasPreviousOrigin)
+        {
+            _grid.TryPlaceItem(_draggedItem, _draggedFromOrigin);
+        }
+
+        Cursor.visible = _cursorWasVisibleBeforeDrag;
         _draggedItem = null;
         _dragHasPreviousOrigin = false;
         _isHoveringGrid = false;
@@ -160,7 +214,7 @@ public class InventoryHudController : MonoBehaviour
             return;
         }
 
-        _hoveredOrigin = GuiToCell(mousePosition);
+        _hoveredOrigin = GuiToCell(mousePosition) - _dragMouseToOriginCellOffset;
         _canDropAtHover = _grid.CanPlaceItem(_draggedItem, _hoveredOrigin);
     }
 
@@ -204,8 +258,8 @@ public class InventoryHudController : MonoBehaviour
         }
 
         var mousePosition = GetGuiMousePosition();
-        var ghostRect = new Rect(mousePosition.x - 8f, mousePosition.y - 8f, 16f, 16f);
-        DrawRect(ghostRect, invalidDropColor);
+        var itemOriginPixel = mousePosition + _dragMouseToOriginPixelOffset;
+        DrawItemCellsAtPixel(_draggedItem, itemOriginPixel, invalidDropColor);
     }
 
     private void DrawItemCells(IInventoryItem item, Vector2Int origin, Color color)
@@ -227,6 +281,25 @@ public class InventoryHudController : MonoBehaviour
             GridRect.y + cell.y * cellPixelSize,
             cellPixelSize,
             cellPixelSize);
+    }
+
+    private void DrawItemCellsAtPixel(IInventoryItem item, Vector2 itemOriginPixel, Color color)
+    {
+        var offsets = item.GetOccupiedOffsets();
+        for (var i = 0; i < offsets.Count; i++)
+        {
+            var cellPixel = itemOriginPixel + (Vector2)offsets[i] * cellPixelSize;
+            var cellRect = new Rect(cellPixel.x, cellPixel.y, cellPixelSize, cellPixelSize);
+            DrawRect(cellRect, color);
+            DrawBorder(cellRect, cellBorderColor, 1f);
+        }
+    }
+
+    private Vector2 CellToPixelPosition(Vector2Int cell)
+    {
+        return new Vector2(
+            GridRect.x + cell.x * cellPixelSize,
+            GridRect.y + cell.y * cellPixelSize);
     }
 
     private Vector2Int GuiToCell(Vector2 guiPosition)
@@ -305,6 +378,14 @@ public class InventoryHudController : MonoBehaviour
                 var center = transform.position + new Vector3(x * gizmoCellSize, -y * gizmoCellSize, 0f);
                 Gizmos.DrawWireCube(center, new Vector3(gizmoCellSize, gizmoCellSize, 0.01f));
             }
+            }
+        }
+
+    private void OnDisable()
+    {
+        if (_draggedItem != null)
+        {
+            Cursor.visible = _cursorWasVisibleBeforeDrag;
         }
     }
 }
