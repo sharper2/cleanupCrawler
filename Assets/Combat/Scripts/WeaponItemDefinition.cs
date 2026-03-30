@@ -12,5 +12,15 @@ namespace DungeonGenerator
         public float Damage => Mathf.Max(0f, damage);
         public float Range => Mathf.Max(0.1f, range);
         public float Cooldown => Mathf.Max(0.01f, cooldown);
+
+        public virtual void ExecuteAttack(PlayerCombatController attacker)
+        {
+            if (attacker == null)
+            {
+                return;
+            }
+
+            attacker.PerformThrustAttack(this);
+        }
     }
 }

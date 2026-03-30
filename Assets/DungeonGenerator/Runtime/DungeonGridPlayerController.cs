@@ -84,7 +84,7 @@ namespace DungeonGenerator
             Vector2Int direction = ToWorldDirection(localMove);
 
             Vector2Int targetCell = _currentCell + direction;
-            if (!dungeonBuilder.IsCellWalkable(targetCell) || HasWallAtCell(targetCell) || HasEnemyAtCell(targetCell))
+            if (!dungeonBuilder.IsCellWalkable(targetCell) || HasWallAtCell(targetCell) || IsCellOccupied(targetCell))
                 return;
 
             StartCoroutine(MoveToCell(targetCell));
@@ -190,9 +190,9 @@ namespace DungeonGenerator
             return generatedRoot.Find(wallName) != null;
         }
 
-        private static bool HasEnemyAtCell(Vector2Int cell)
+        private static bool IsCellOccupied(Vector2Int cell)
         {
-            return StaticEnemy.IsCellOccupied(cell);
+            return GridCellOccupantRegistry.IsCellOccupied(cell);
         }
 
         private void TryCollectFloorItemAtCurrentCell()

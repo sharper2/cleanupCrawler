@@ -7,3 +7,6 @@
 - Prioritize efficiency in code execution and structure.
 - Keep debug output lean and clear.
 - Prefer modifying existing approaches over layering extra code.
+
+## Repository Organization
+- Game-specific systems should not be placed under DungeonGenerator; they should live in dedicated folders under the main Assets root.

@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using DungeonGenerator;
 using UnityEngine;
 
 public class InventoryHudController : MonoBehaviour
@@ -17,6 +18,7 @@ public class InventoryHudController : MonoBehaviour
     [SerializeField] private Color cellColor = new(0.2f, 0.2f, 0.2f, 0.7f);
     [SerializeField] private Color cellBorderColor = new(0f, 0f, 0f, 0.9f);
     [SerializeField] private Color itemColor = new(0.2f, 0.55f, 0.95f, 0.75f);
+    [SerializeField] private Color equippedItemColor = new(0.95f, 0.8f, 0.2f, 0.85f);
     [SerializeField] private Color validDropColor = new(0.2f, 0.9f, 0.3f, 0.5f);
     [SerializeField] private Color invalidDropColor = new(0.95f, 0.2f, 0.2f, 0.5f);
 
@@ -37,6 +39,10 @@ public class InventoryHudController : MonoBehaviour
     private bool _isHoveringGrid;
     private Vector2Int _hoveredOrigin;
     private bool _canDropAtHover;
+    private InventoryItemDefinition _lastClickedDefinition;
+    private float _lastClickTime = -999f;
+
+    private const float DoubleClickThresholdSeconds = 0.3f;
 
     private Rect GridRect => new(panelPosition.x, panelPosition.y, gridSize.x * cellPixelSize, gridSize.y * cellPixelSize);
 
@@ -105,6 +111,11 @@ public class InventoryHudController : MonoBehaviour
 
         if (GetPrimaryMouseDown())
         {
+            if (_draggedItem == null && TryToggleEquipByDoubleClick())
+            {
+                return;
+            }
+
             BeginDrag();
         }
 
@@ -173,6 +184,7 @@ public class InventoryHudController : MonoBehaviour
         }
 
         var placed = _isHoveringGrid && _canDropAtHover && _grid.TryPlaceItem(_draggedItem, _hoveredOrigin);
+
         if (!placed && _dragHasPreviousOrigin)
         {
             _grid.TryPlaceItem(_draggedItem, _draggedFromOrigin);
@@ -183,6 +195,98 @@ public class InventoryHudController : MonoBehaviour
         _dragHasPreviousOrigin = false;
         _isHoveringGrid = false;
         _canDropAtHover = false;
+    }
+
+    private bool TryToggleEquipByDoubleClick()
+    {
+        var mousePosition = GetGuiMousePosition();
+        if (!GridRect.Contains(mousePosition))
+        {
+            return false;
+        }
+
+        var cell = GuiToCell(mousePosition);
+        var clickedItem = _grid.GetItemAt(cell);
+        var clickedDefinition = clickedItem != null ? clickedItem.Definition : null;
+        if (clickedDefinition == null)
+        {
+            return false;
+        }
+
+        var isDoubleClick = ReferenceEquals(clickedDefinition, _lastClickedDefinition)
+            && Time.unscaledTime - _lastClickTime <= DoubleClickThresholdSeconds;
+
+        _lastClickedDefinition = clickedDefinition;
+        _lastClickTime = Time.unscaledTime;
+
+        if (!isDoubleClick)
+        {
+            return false;
+        }
+
+        if (IsAssetEquipped(clickedDefinition))
+        {
+            return TryUnequipAsset(clickedDefinition);
+        }
+
+        return TryEquipAsset(clickedDefinition);
+    }
+
+    private static bool TryEquipAsset(Object itemAsset)
+    {
+        if (itemAsset == null)
+        {
+            return false;
+        }
+
+        var receivers = FindObjectsByType<MonoBehaviour>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+        for (var i = 0; i < receivers.Length; i++)
+        {
+            if (receivers[i] is IEquipmentReceiver receiver && receiver.TryEquipObject(itemAsset))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool TryUnequipAsset(Object itemAsset)
+    {
+        if (itemAsset == null)
+        {
+            return false;
+        }
+
+        var receivers = FindObjectsByType<MonoBehaviour>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+        for (var i = 0; i < receivers.Length; i++)
+        {
+            if (receivers[i] is IEquipmentReceiver receiver && receiver.TryUnequipObject(itemAsset))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsAssetEquipped(Object itemAsset)
+    {
+        if (itemAsset == null)
+        {
+            return false;
+        }
+
+        var receivers = FindObjectsByType<MonoBehaviour>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+        for (var i = 0; i < receivers.Length; i++)
+        {
+            if (receivers[i] is IEquipmentReceiver receiver && receiver.IsEquippedObject(itemAsset))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private void CancelDragToPreviousPosition()
@@ -245,7 +349,8 @@ public class InventoryHudController : MonoBehaviour
                 continue;
             }
 
-            DrawItemCells(item, origin, itemColor);
+            var color = IsAssetEquipped(item.Definition) ? equippedItemColor : itemColor;
+            DrawItemCells(item, origin, color);
         }
     }
 

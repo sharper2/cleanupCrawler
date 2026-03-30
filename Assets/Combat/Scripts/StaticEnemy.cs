@@ -1,13 +1,10 @@
-using System.Collections.Generic;
 using UnityEngine;
 
 namespace DungeonGenerator
 {
     [RequireComponent(typeof(HealthComponent))]
-    public class StaticEnemy : MonoBehaviour
+    public class StaticEnemy : MonoBehaviour, IGridCellOccupant
     {
-        private static readonly HashSet<StaticEnemy> ActiveEnemies = new();
-
         [Header("Grid")]
         [SerializeField] private DungeonBasic3DBuilder dungeonBuilder;
         [SerializeField] private Transform gridAnchor;
@@ -30,7 +27,7 @@ namespace DungeonGenerator
 
         private void OnEnable()
         {
-            ActiveEnemies.Add(this);
+            GridCellOccupantRegistry.Register(this);
         }
 
         private void Start()
@@ -48,20 +45,7 @@ namespace DungeonGenerator
 
         private void OnDisable()
         {
-            ActiveEnemies.Remove(this);
-        }
-
-        public static bool IsCellOccupied(Vector2Int cell)
-        {
-            foreach (var enemy in ActiveEnemies)
-            {
-                if (enemy.TryGetOccupiedCell(out var occupiedCell) && occupiedCell == cell)
-                {
-                    return true;
-                }
-            }
-
-            return false;
+            GridCellOccupantRegistry.Unregister(this);
         }
 
         public bool TryGetOccupiedCell(out Vector2Int cell)
