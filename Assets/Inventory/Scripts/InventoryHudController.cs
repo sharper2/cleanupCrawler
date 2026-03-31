@@ -14,6 +14,9 @@ public class InventoryHudController : MonoBehaviour
     [SerializeField] private KeyCode rotateKey = KeyCode.R;
     [SerializeField] private List<InventoryItemDefinition> startingItems = new();
 
+    [Header("Progress")]
+    [SerializeField] private int levelQuota = 100;
+
     [Header("Debug Visual")]
     [SerializeField] private Color cellColor = new(0.2f, 0.2f, 0.2f, 0.7f);
     [SerializeField] private Color cellBorderColor = new(0f, 0f, 0f, 0.9f);
@@ -21,6 +24,10 @@ public class InventoryHudController : MonoBehaviour
     [SerializeField] private Color equippedItemColor = new(0.95f, 0.8f, 0.2f, 0.85f);
     [SerializeField] private Color validDropColor = new(0.2f, 0.9f, 0.3f, 0.5f);
     [SerializeField] private Color invalidDropColor = new(0.95f, 0.2f, 0.2f, 0.5f);
+    [SerializeField] private Vector2 deleteZoneSize = new(160f, 42f);
+    [SerializeField] private float deleteZoneTopMargin = 10f;
+    [SerializeField] private Color deleteZoneColor = new(0.45f, 0.12f, 0.12f, 0.8f);
+    [SerializeField] private Color deleteZoneHoverColor = new(0.8f, 0.15f, 0.15f, 0.9f);
 
     [Header("Scene Gizmo")]
     [SerializeField] private bool drawSceneGizmo = true;
@@ -31,6 +38,7 @@ public class InventoryHudController : MonoBehaviour
 
     private InventoryItemInstance _draggedItem;
     private Vector2Int _draggedFromOrigin;
+    private int _draggedFromRotationSteps;
     private bool _dragHasPreviousOrigin;
     private Vector2Int _dragMouseToOriginCellOffset;
     private Vector2 _dragMouseToOriginPixelOffset;
@@ -45,6 +53,17 @@ public class InventoryHudController : MonoBehaviour
     private const float DoubleClickThresholdSeconds = 0.3f;
 
     private Rect GridRect => new(panelPosition.x, panelPosition.y, gridSize.x * cellPixelSize, gridSize.y * cellPixelSize);
+    private Rect DeleteZoneRect => new(
+        GridRect.xMax - deleteZoneSize.x,
+        GridRect.yMax + deleteZoneTopMargin,
+        deleteZoneSize.x,
+        deleteZoneSize.y);
+
+    private int _score;
+
+    public int Score => _score;
+    public int LevelQuota => Mathf.Max(0, levelQuota);
+    public bool CanCompleteLevel => Score > LevelQuota;
 
     private void Awake()
     {
@@ -139,6 +158,7 @@ public class InventoryHudController : MonoBehaviour
 
         DrawGrid();
         DrawPlacedItems();
+        DrawDeleteZone();
 
         if (_draggedItem != null)
         {
@@ -163,6 +183,7 @@ public class InventoryHudController : MonoBehaviour
 
         _draggedItem = selectedItem;
         _dragHasPreviousOrigin = _grid.TryGetOrigin(selectedItem, out _draggedFromOrigin);
+        _draggedFromRotationSteps = selectedItem.RotationSteps;
 
         var itemOriginCell = _dragHasPreviousOrigin ? _draggedFromOrigin : cell;
         _dragMouseToOriginCellOffset = cell - itemOriginCell;
@@ -183,11 +204,13 @@ public class InventoryHudController : MonoBehaviour
             return;
         }
 
+        var mousePosition = GetGuiMousePosition();
+        var deleted = IsHoveringDeleteZone(mousePosition) && TryDeleteDraggedItem();
         var placed = _isHoveringGrid && _canDropAtHover && _grid.TryPlaceItem(_draggedItem, _hoveredOrigin);
 
-        if (!placed && _dragHasPreviousOrigin)
+        if (!deleted && !placed && _dragHasPreviousOrigin)
         {
-            _grid.TryPlaceItem(_draggedItem, _draggedFromOrigin);
+            RestoreDraggedItemToPreviousPosition();
         }
 
         Cursor.visible = _cursorWasVisibleBeforeDrag;
@@ -298,7 +321,7 @@ public class InventoryHudController : MonoBehaviour
 
         if (_dragHasPreviousOrigin)
         {
-            _grid.TryPlaceItem(_draggedItem, _draggedFromOrigin);
+            RestoreDraggedItemToPreviousPosition();
         }
 
         Cursor.visible = _cursorWasVisibleBeforeDrag;
@@ -306,6 +329,33 @@ public class InventoryHudController : MonoBehaviour
         _dragHasPreviousOrigin = false;
         _isHoveringGrid = false;
         _canDropAtHover = false;
+    }
+
+    private void RestoreDraggedItemToPreviousPosition()
+    {
+        if (_draggedItem == null)
+        {
+            return;
+        }
+
+        _draggedItem.RotationSteps = _draggedFromRotationSteps;
+        _grid.TryPlaceItem(_draggedItem, _draggedFromOrigin);
+    }
+
+    private bool TryDeleteDraggedItem()
+    {
+        if (_draggedItem == null || _draggedItem.Definition == null)
+        {
+            return false;
+        }
+
+        _score += _draggedItem.Definition.Value;
+        return true;
+    }
+
+    private bool IsHoveringDeleteZone(Vector2 guiMousePosition)
+    {
+        return DeleteZoneRect.Contains(guiMousePosition);
     }
 
     private void UpdateHoveredPlacement()
@@ -320,6 +370,20 @@ public class InventoryHudController : MonoBehaviour
 
         _hoveredOrigin = GuiToCell(mousePosition) - _dragMouseToOriginCellOffset;
         _canDropAtHover = _grid.CanPlaceItem(_draggedItem, _hoveredOrigin);
+    }
+
+    private void DrawDeleteZone()
+    {
+        var hoveringDeleteZone = _draggedItem != null && IsHoveringDeleteZone(GetGuiMousePosition());
+        var zoneColor = hoveringDeleteZone ? deleteZoneHoverColor : deleteZoneColor;
+
+        DrawRect(DeleteZoneRect, zoneColor);
+        DrawBorder(DeleteZoneRect, cellBorderColor, 1f);
+
+        GUI.Label(DeleteZoneRect, "DELETE");
+
+        var scoreRect = new Rect(GridRect.x, DeleteZoneRect.yMax + 4f, GridRect.width, 24f);
+        GUI.Label(scoreRect, $"Score: {Score} / Quota: {LevelQuota} {(CanCompleteLevel ? "(Ready)" : string.Empty)}");
     }
 
     private void DrawGrid()

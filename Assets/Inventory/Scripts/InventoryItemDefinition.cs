@@ -7,6 +7,7 @@ public class InventoryItemDefinition : ScriptableObject
 {
     [SerializeField] private string displayName = "Item";
     [SerializeField] private Sprite icon;
+    [SerializeField] private int value = 1;
     [SerializeField] private List<RectInt> shapeRectangles = new() { new RectInt(0, 0, 1, 1) };
     [SerializeField] private List<Vector2Int> shapeOffsets = new() { Vector2Int.zero };
 
@@ -14,6 +15,7 @@ public class InventoryItemDefinition : ScriptableObject
 
     public string DisplayName => displayName;
     public Sprite Icon => icon;
+    public int Value => Mathf.Max(0, value);
 
     public IReadOnlyList<Vector2Int> GetOccupiedOffsets(int rotationSteps)
     {
