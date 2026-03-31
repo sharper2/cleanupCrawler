@@ -93,6 +93,44 @@ public class InventoryHudController : MonoBehaviour
         return _grid.TryPlaceItem(instance, origin);
     }
 
+    public bool TryConsumeItem(InventoryItemDefinition definition, int amount = 1)
+    {
+        if (definition == null || amount <= 0)
+        {
+            return false;
+        }
+
+        EnsureGridInitialized();
+
+        var matchingItems = new List<InventoryItemInstance>(amount);
+        var items = _grid.Items;
+
+        for (var i = 0; i < items.Count; i++)
+        {
+            var item = items[i];
+            if (item != null && ReferenceEquals(item.Definition, definition))
+            {
+                matchingItems.Add(item);
+                if (matchingItems.Count >= amount)
+                {
+                    break;
+                }
+            }
+        }
+
+        if (matchingItems.Count < amount)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < amount; i++)
+        {
+            _grid.RemoveItem(matchingItems[i]);
+        }
+
+        return true;
+    }
+
     private void EnsureGridInitialized()
     {
         if (_grid != null)

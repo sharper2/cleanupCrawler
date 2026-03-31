@@ -23,12 +23,17 @@ namespace DungeonGenerator
         [SerializeField] private float threatScanRadius = 6f;
         [SerializeField] private LayerMask threatLayerMask = ~0;
 
+        [Header("Combat")]
+        [SerializeField] private WeaponItemDefinition attackType;
+        [SerializeField] private float attackRange = 1.5f;
+
         private readonly Collider[] _threatBuffer = new Collider[32];
         private readonly HashSet<Vector2Int> _roamRegionCells = new HashSet<Vector2Int>();
         private readonly HashSet<Vector2Int> _roamCells = new HashSet<Vector2Int>();
         private readonly List<Vector2Int> _adjacentCandidates = new List<Vector2Int>(4);
 
         private StaticEnemy _enemy;
+        private CombatAttackController _attackController;
         private EnemyState _state = EnemyState.Roaming;
         private float _nextMoveAt;
         private bool _isMoving;
@@ -41,6 +46,7 @@ namespace DungeonGenerator
         private void Awake()
         {
             _enemy = GetComponent<StaticEnemy>();
+            _attackController = GetComponent<CombatAttackController>();
         }
 
         private void Start()
@@ -53,6 +59,7 @@ namespace DungeonGenerator
         {
             if (_state != EnemyState.Roaming)
             {
+                UpdateThreatState();
                 return;
             }
 
@@ -70,6 +77,39 @@ namespace DungeonGenerator
 
             _nextMoveAt = Time.time + Mathf.Max(0.05f, moveInterval);
             TryMoveToAdjacentRoamCell();
+        }
+
+        private void UpdateThreatState()
+        {
+            if (_state != EnemyState.ThreatSpotted)
+            {
+                return;
+            }
+
+            if (SpottedThreat == null || SpottedThreat.ThreatTransform == null)
+            {
+                _state = EnemyState.Roaming;
+                SpottedThreat = null;
+                return;
+            }
+
+            var threatOffset = SpottedThreat.ThreatTransform.position - transform.position;
+            threatOffset.y = 0f;
+
+            if (threatOffset.sqrMagnitude > 0.0001f)
+            {
+                transform.rotation = Quaternion.LookRotation(threatOffset.normalized, Vector3.up);
+            }
+
+            if (_attackController == null || attackType == null)
+            {
+                return;
+            }
+
+            if (threatOffset.sqrMagnitude <= attackRange * attackRange)
+            {
+                _attackController.TryExecuteAttack(attackType);
+            }
         }
 
         private void RebuildRoamArea()

@@ -9,14 +9,14 @@ namespace DungeonGenerator
 
         public float SwipeWidth => Mathf.Max(0.1f, swipeWidth);
 
-        public override void ExecuteAttack(PlayerCombatController attacker)
+        public override bool ExecuteAttack(CombatAttackController attacker)
         {
             if (attacker == null)
             {
-                return;
+                return false;
             }
 
-            attacker.PerformSwordSwipeAttack(this, SwipeWidth);
+            return attacker.PerformSwordSwipeAttack(this, SwipeWidth);
         }
     }
 }

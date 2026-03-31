@@ -7,20 +7,22 @@ namespace DungeonGenerator
     {
         [SerializeField] private float damage = 20f;
         [SerializeField] private float range = 2f;
+        [SerializeField] private float attackActiveDuration = 0.12f;
         [SerializeField] private float cooldown = 0.35f;
 
         public float Damage => Mathf.Max(0f, damage);
         public float Range => Mathf.Max(0.1f, range);
+        public float AttackActiveDuration => Mathf.Max(0.01f, attackActiveDuration);
         public float Cooldown => Mathf.Max(0.01f, cooldown);
 
-        public virtual void ExecuteAttack(PlayerCombatController attacker)
+        public virtual bool ExecuteAttack(CombatAttackController attacker)
         {
             if (attacker == null)
             {
-                return;
+                return false;
             }
 
-            attacker.PerformThrustAttack(this);
+            return attacker.PerformThrustAttack(this);
         }
     }
 }

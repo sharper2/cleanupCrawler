@@ -7,6 +7,7 @@
 - Prioritize efficiency in code execution and structure.
 - Keep debug output lean and clear.
 - Prefer modifying existing approaches over layering extra code.
+- Define attack active duration by weapon data rather than by the attacking actor/controller.
 
 ## Repository Organization
 - Game-specific systems should not be placed under DungeonGenerator; they should live in dedicated folders under the main Assets root.
