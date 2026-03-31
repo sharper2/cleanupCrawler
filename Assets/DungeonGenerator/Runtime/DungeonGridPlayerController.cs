@@ -10,6 +10,7 @@ namespace DungeonGenerator
 
         [Header("Movement")]
         public float moveDuration = 0.12f;
+        public float stepPauseDuration = 0.06f;
         public float turnDuration = 0.08f;
         public float yOffset = 0.5f;
         public bool snapToStartOnPlay = true;
@@ -25,6 +26,7 @@ namespace DungeonGenerator
         private int _queuedTurn;
         private Vector2Int _facing = Vector2Int.up;
         private Rigidbody _rigidbody;
+        private float _nextStepAllowedAt;
 
         private void Awake()
         {
@@ -76,6 +78,9 @@ namespace DungeonGenerator
             }
 
             if (_queuedMove == Vector2Int.zero)
+                return;
+
+            if (Time.time < _nextStepAllowedAt)
                 return;
 
             Vector2Int localMove = _queuedMove;
@@ -275,6 +280,7 @@ namespace DungeonGenerator
             SetAnchorWorldPosition(end);
             _currentCell = targetCell;
             _hasCurrentCell = true;
+            _nextStepAllowedAt = Time.time + Mathf.Max(0f, stepPauseDuration);
             _isMoving = false;
         }
 
