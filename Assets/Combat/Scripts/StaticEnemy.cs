@@ -17,6 +17,13 @@ namespace DungeonGenerator
         private bool _hasCell;
         private Vector2Int _occupiedCell;
 
+        public DungeonBasic3DBuilder DungeonBuilder => dungeonBuilder;
+        public bool KeepSnappedToGrid
+        {
+            get => keepSnappedToGrid;
+            set => keepSnappedToGrid = value;
+        }
+
         private void Awake()
         {
             if (dungeonBuilder == null)
@@ -53,6 +60,43 @@ namespace DungeonGenerator
             UpdateOccupiedCellFromAnchor();
             cell = _occupiedCell;
             return _hasCell;
+        }
+
+        public bool TrySetOccupiedCell(Vector2Int cell)
+        {
+            if (dungeonBuilder == null || !dungeonBuilder.IsCellWalkable(cell))
+            {
+                return false;
+            }
+
+            Vector3 anchorPosition = GetAnchorPosition();
+            Vector3 cellCenter = GetCellCenterWorld(cell);
+            transform.position += cellCenter - anchorPosition;
+
+            _occupiedCell = cell;
+            _hasCell = true;
+            return true;
+        }
+
+        public Vector3 GetAnchorWorldPosition()
+        {
+            return GetAnchorPosition();
+        }
+
+        public void SetAnchorWorldPosition(Vector3 anchorWorldPosition)
+        {
+            Vector3 anchorPosition = GetAnchorPosition();
+            transform.position += anchorWorldPosition - anchorPosition;
+        }
+
+        public Vector3 GetCellCenterWorld(Vector2Int cell)
+        {
+            if (dungeonBuilder == null)
+            {
+                return transform.position;
+            }
+
+            return dungeonBuilder.CellCenterToWorld(cell, yOffset);
         }
 
         private void SnapToGridCell()
