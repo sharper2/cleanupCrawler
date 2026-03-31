@@ -110,12 +110,28 @@ namespace DungeonGenerator
             }
 
             var origin = transform.position + Vector3.up * castHeight;
-            var direction = transform.forward;
+            var direction = SnapToGridDirection(transform.forward);
             var projectile = Instantiate(weapon.ProjectilePrefab, origin, Quaternion.LookRotation(direction, Vector3.up));
 
             var lifetime = weapon.Range / weapon.ProjectileSpeed;
             projectile.Initialize(direction, weapon.ProjectileSpeed, weapon.Damage, lifetime, transform);
             return true;
+        }
+
+        private static Vector3 SnapToGridDirection(Vector3 direction)
+        {
+            var flat = new Vector3(direction.x, 0f, direction.z);
+            if (flat.sqrMagnitude <= 0.0001f)
+            {
+                return Vector3.forward;
+            }
+
+            if (Mathf.Abs(flat.x) >= Mathf.Abs(flat.z))
+            {
+                return flat.x >= 0f ? Vector3.right : Vector3.left;
+            }
+
+            return flat.z >= 0f ? Vector3.forward : Vector3.back;
         }
 
         private void BeginAttack(AttackShape shape, WeaponItemDefinition weapon, float swipeWidth)
