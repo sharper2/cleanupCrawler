@@ -1,3 +1,4 @@
+using System;
 using UnityEngine;
 
 namespace DungeonGenerator
@@ -12,6 +13,9 @@ namespace DungeonGenerator
         public float CurrentHealth => _currentHealth;
         public float MaxHealth => Mathf.Max(1f, maxHealth);
         public bool IsAlive => _currentHealth > 0f;
+
+        /// <summary>Invoked after health is reduced by a positive damage amount.</summary>
+        public event Action<float> DamageTaken;
 
         private void Awake()
         {
@@ -31,6 +35,8 @@ namespace DungeonGenerator
             }
 
             _currentHealth = Mathf.Max(0f, _currentHealth - amount);
+
+            DamageTaken?.Invoke(amount);
 
             if (_currentHealth <= 0f)
             {

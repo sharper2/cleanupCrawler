@@ -62,6 +62,8 @@ namespace DungeonGenerator
                 return false;
             }
 
+            StopAllCoroutines();
+
             _queuedMove = Vector2Int.zero;
             _queuedTurn = 0;
             _isMoving = false;
@@ -73,6 +75,111 @@ namespace DungeonGenerator
 
             SetAnchorWorldPosition(dungeonBuilder.CellCenterToWorld(cell, yOffset));
             return true;
+        }
+
+        /// <summary>
+        /// Snaps the player to a grid cell without validating walkability (for level bootstrap when the walkable set must match the layout).
+        /// Prefer <see cref="TryTeleportToCell"/> when possible.
+        /// </summary>
+        public void ForceSetGridCell(Vector2Int cell)
+        {
+            if (dungeonBuilder == null)
+            {
+                return;
+            }
+
+            StopAllCoroutines();
+
+            _queuedMove = Vector2Int.zero;
+            _queuedTurn = 0;
+            _isMoving = false;
+            _isTurning = false;
+
+            _currentCell = cell;
+            _hasCurrentCell = true;
+            _nextStepAllowedAt = Time.time;
+
+            SetAnchorWorldPosition(dungeonBuilder.CellCenterToWorld(cell, yOffset));
+        }
+
+        /// <summary>
+        /// Pushes the player up to <paramref name="cellCount"/> cardinal steps away from <paramref name="attackerCell"/>
+        /// (e.g. melee knockback). Stops early if a wall, non-walkable cell, or other occupant blocks the path.
+        /// </summary>
+        public bool TryKnockbackFromSourceCell(Vector2Int attackerCell, int cellCount)
+        {
+            if (cellCount <= 0 || dungeonBuilder == null)
+            {
+                return false;
+            }
+
+            if (!_hasCurrentCell && !ResolveCurrentCell())
+            {
+                return false;
+            }
+
+            var dir = CardinalDirectionFromCells(attackerCell, _currentCell);
+            if (dir == Vector2Int.zero)
+            {
+                return false;
+            }
+
+            var candidate = _currentCell;
+            for (var step = 0; step < cellCount; step++)
+            {
+                var next = candidate + dir;
+                if (!IsCellValidForKnockbackStep(next))
+                {
+                    break;
+                }
+
+                candidate = next;
+            }
+
+            if (candidate == _currentCell)
+            {
+                return false;
+            }
+
+            return TryTeleportToCell(candidate);
+        }
+
+        private bool IsCellValidForKnockbackStep(Vector2Int cell)
+        {
+            if (!dungeonBuilder.IsCellWalkable(cell))
+            {
+                return false;
+            }
+
+            if (HasWallAtCell(cell))
+            {
+                return false;
+            }
+
+            return !IsCellOccupied(cell);
+        }
+
+        private static Vector2Int CardinalDirectionFromCells(Vector2Int fromCell, Vector2Int toCell)
+        {
+            var d = toCell - fromCell;
+            if (d.x != 0 && d.y != 0)
+            {
+                return Mathf.Abs(d.x) >= Mathf.Abs(d.y)
+                    ? new Vector2Int((int)Mathf.Sign(d.x), 0)
+                    : new Vector2Int(0, (int)Mathf.Sign(d.y));
+            }
+
+            if (d.x != 0)
+            {
+                return new Vector2Int((int)Mathf.Sign(d.x), 0);
+            }
+
+            if (d.y != 0)
+            {
+                return new Vector2Int(0, (int)Mathf.Sign(d.y));
+            }
+
+            return Vector2Int.zero;
         }
 
         private void OnEnable()
@@ -171,6 +278,8 @@ namespace DungeonGenerator
         {
             if (dungeonBuilder == null)
                 return;
+
+            StopAllCoroutines();
 
             EnsureDungeonReady(true);
 

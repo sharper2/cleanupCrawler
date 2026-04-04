@@ -12,7 +12,8 @@ namespace CleanupCrawler.Levels
         [Header("Pickups")]
         [SerializeField] private int minPickupCount = 4;
         [SerializeField] private int maxPickupCount = 10;
-        [SerializeField] private List<LevelLootEntry> lootPool = new();
+        [SerializeField, Tooltip("Weighted spawns. Each entry can be an inventory pickup or an ability-queue orb (see Kind).")]
+        private List<LevelLootEntry> lootPool = new();
 
         [Header("Enemies")]
         [SerializeField] private int minEnemyCount = 2;

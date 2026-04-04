@@ -36,7 +36,13 @@ namespace DungeonGenerator
 
         [Header("Combat")]
         [SerializeField] private WeaponItemDefinition attackType;
+        [Tooltip("Fallback when attackType is missing. Otherwise melee engagement uses attackType.Range (weapon reach).")]
         [SerializeField] private float closeAttackRange = 2f;
+
+        [Header("Attack prep (telegraph)")]
+        [Tooltip("Seconds to hold before releasing the attack. Set to 0 to strike immediately (no tint).")]
+        [SerializeField, Min(0f)] private float attackPrepDuration = 0.35f;
+        [SerializeField] private Color attackPrepTintColor = new(1f, 0.42f, 0.12f, 1f);
 
         private readonly Collider[] _threatBuffer = new Collider[32];
         private readonly RaycastHit[] _lineOfSightBuffer = new RaycastHit[16];
@@ -60,6 +66,11 @@ namespace DungeonGenerator
         private int _stuckMoveAttempts;
         private float _nextThreatScanAt;
 
+        private MaterialPropertyBlock _attackPrepMpb;
+        private Renderer[] _telegraphRenderers;
+        private bool _attackWindupActive;
+        private float _attackWindupEndTime;
+
         private const int MaxStuckMoveAttempts = 3;
         private const int MaxPathSearchNodes = 512;
 
@@ -75,6 +86,8 @@ namespace DungeonGenerator
         {
             _enemy = GetComponent<StaticEnemy>();
             _attackController = GetComponent<CombatAttackController>();
+            _attackPrepMpb = new MaterialPropertyBlock();
+            _telegraphRenderers = GetComponentsInChildren<Renderer>(true);
         }
 
         private void Start()
@@ -92,6 +105,7 @@ namespace DungeonGenerator
         {
             if (SpottedThreat != null && ShouldLoseThreat(SpottedThreat))
             {
+                CancelAttackWindupIfAny();
                 ReturnToRoaming();
             }
 
@@ -152,7 +166,7 @@ namespace DungeonGenerator
 
             FaceThreat(SpottedThreat.ThreatTransform.position);
 
-            float range = Mathf.Max(0.1f, closeAttackRange);
+            float range = GetCloseCombatEngagementRange();
             if (IsThreatInRange(SpottedThreat.ThreatTransform.position, range))
             {
                 _state = EnemyState.CloseAttacking;
@@ -181,21 +195,37 @@ namespace DungeonGenerator
         {
             if (SpottedThreat == null || SpottedThreat.ThreatTransform == null)
             {
+                CancelAttackWindupIfAny();
                 ReturnToRoaming();
                 return;
             }
 
             FaceThreat(SpottedThreat.ThreatTransform.position);
 
-            float range = Mathf.Max(0.1f, closeAttackRange);
+            float range = GetCloseCombatEngagementRange();
             if (!IsThreatInRange(SpottedThreat.ThreatTransform.position, range))
             {
+                CancelAttackWindupIfAny();
                 _state = EnemyState.CloseChasing;
                 _nextMoveAt = Time.time + Mathf.Max(0.05f, chasingMoveInterval);
                 return;
             }
 
-            TryAttackCurrentThreat();
+            ProcessAttackWindupAndStrike();
+        }
+
+        /// <summary>
+        /// Horizontal distance at which a melee attack can hit (matches <see cref="WeaponItemDefinition.Range"/> / combat overlap).
+        /// Longer weapons let the enemy stand farther back while still entering attack state.
+        /// </summary>
+        private float GetCloseCombatEngagementRange()
+        {
+            if (attackType != null)
+            {
+                return Mathf.Max(0.1f, attackType.Range);
+            }
+
+            return Mathf.Max(0.1f, closeAttackRange);
         }
 
         private void UpdateRangedChasing()
@@ -242,6 +272,7 @@ namespace DungeonGenerator
         {
             if (SpottedThreat == null || SpottedThreat.ThreatTransform == null)
             {
+                CancelAttackWindupIfAny();
                 ReturnToRoaming();
                 return;
             }
@@ -250,22 +281,88 @@ namespace DungeonGenerator
             float range = Mathf.Max(0.1f, attackType != null ? attackType.Range : closeAttackRange);
             if (!TryEvaluateRangedAttack(threatPosition, SpottedThreat.ThreatTransform, range, out var shotDirection))
             {
+                CancelAttackWindupIfAny();
                 _state = EnemyState.RangedChasing;
                 _nextMoveAt = Time.time + Mathf.Max(0.05f, chasingMoveInterval);
                 return;
             }
 
             FaceDirection(shotDirection);
-            TryAttackCurrentThreat();
+            ProcessAttackWindupAndStrike();
         }
 
         private void ReturnToRoaming()
         {
+            CancelAttackWindupIfAny();
             SpottedThreat = null;
             _state = EnemyState.Roaming;
             _currentDirection = Vector2Int.zero;
             _remainingStraightSteps = 0;
             _stuckMoveAttempts = 0;
+        }
+
+        private void ProcessAttackWindupAndStrike()
+        {
+            if (attackType == null || _attackController == null)
+            {
+                return;
+            }
+
+            var prep = Mathf.Max(0f, attackPrepDuration);
+
+            if (!_attackWindupActive)
+            {
+                if (!_attackController.CanExecuteAttack(attackType))
+                {
+                    return;
+                }
+
+                if (prep <= 0f)
+                {
+                    _attackController.TryExecuteAttack(attackType);
+                    return;
+                }
+
+                BeginAttackWindup();
+                return;
+            }
+
+            if (Time.time < _attackWindupEndTime)
+            {
+                return;
+            }
+
+            if (!_attackController.TryExecuteAttack(attackType))
+            {
+                CancelAttackWindupIfAny();
+                return;
+            }
+
+            EndAttackWindup();
+        }
+
+        private void BeginAttackWindup()
+        {
+            _attackWindupActive = true;
+            _attackWindupEndTime = Time.time + Mathf.Max(0.01f, attackPrepDuration);
+            EnemyAttackTelegraphTint.Apply(_telegraphRenderers, attackPrepTintColor, _attackPrepMpb);
+        }
+
+        private void EndAttackWindup()
+        {
+            _attackWindupActive = false;
+            EnemyAttackTelegraphTint.Clear(_telegraphRenderers);
+        }
+
+        private void CancelAttackWindupIfAny()
+        {
+            if (!_attackWindupActive)
+            {
+                return;
+            }
+
+            _attackWindupActive = false;
+            EnemyAttackTelegraphTint.Clear(_telegraphRenderers);
         }
 
         private bool ShouldLoseThreat(IThreat threat)
@@ -294,14 +391,6 @@ namespace DungeonGenerator
             Vector3 delta = threatPosition - GetEnemyReferencePosition();
             delta.y = 0f;
             return delta.sqrMagnitude <= range * range;
-        }
-
-        private void TryAttackCurrentThreat()
-        {
-            if (_attackController != null && attackType != null)
-            {
-                _attackController.TryExecuteAttack(attackType);
-            }
         }
 
         private void RebuildRoamArea()

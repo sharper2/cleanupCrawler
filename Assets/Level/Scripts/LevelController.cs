@@ -166,7 +166,7 @@ namespace CleanupCrawler.Levels
                 var startCell = ResolveStartCell(walkableCells);
                 var exitCell = ResolveExitCell(walkableCells, startCell);
 
-                PlacePlayerAtStart(startCell);
+                PlacePlayerAtStart(startCell, walkableCells);
                 if (applyPlayerInventorySetup)
                 {
                     ApplyPlayerInventorySetup();
@@ -284,16 +284,31 @@ namespace CleanupCrawler.Levels
             return bestCell;
         }
 
-        private void PlacePlayerAtStart(Vector2Int startCell)
+        private void PlacePlayerAtStart(Vector2Int startCell, IReadOnlyList<Vector2Int> walkableCells)
         {
             if (playerController != null)
             {
                 playerController.dungeonBuilder = dungeonBuilder;
 
-                if (!playerController.TryTeleportToCell(startCell))
+                if (playerController.TryTeleportToCell(startCell))
                 {
-                    playerController.SnapToStart();
+                    return;
                 }
+
+                for (var i = 0; i < walkableCells.Count; i++)
+                {
+                    var c = walkableCells[i];
+                    if (playerController.TryTeleportToCell(c))
+                    {
+                        return;
+                    }
+                }
+
+                if (walkableCells.Count > 0)
+                {
+                    playerController.ForceSetGridCell(walkableCells[0]);
+                }
+
                 return;
             }
 
@@ -302,7 +317,13 @@ namespace CleanupCrawler.Levels
                 return;
             }
 
-            playerTransform.position = dungeonBuilder.CellCenterToWorld(startCell, 0.5f);
+            var placeCell = startCell;
+            if (walkableCells != null && walkableCells.Count > 0 && !dungeonBuilder.IsCellWalkable(placeCell))
+            {
+                placeCell = walkableCells[0];
+            }
+
+            playerTransform.position = dungeonBuilder.CellCenterToWorld(placeCell, 0.5f);
         }
 
         private void ApplyPlayerInventorySetup()
@@ -345,16 +366,34 @@ namespace CleanupCrawler.Levels
             for (var i = 0; i < spawnCount; i++)
             {
                 var cell = TakeRandomCell(availableCells);
-                var entry = SelectWeightedEntry(pool, e => e != null && e.Item != null, e => e.Weight);
+                var entry = SelectWeightedEntry(pool, e => e != null && e.HasValidLoot(), e => e.Weight);
                 if (entry == null)
                 {
                     continue;
                 }
 
-                var pickupObject = new GameObject($"Pickup_{entry.Item.DisplayName}");
+                var pickupObject = new GameObject($"Pickup_{entry.ResolvePickupDisplayName()}");
                 pickupObject.transform.SetParent(transform, false);
-                var pickup = pickupObject.AddComponent<FloorInventoryItemPickup>();
-                if (!pickup.Configure(dungeonBuilder, entry.Item, cell))
+
+                if (entry.Kind == LevelLootKind.InventoryItem)
+                {
+                    var pickup = pickupObject.AddComponent<FloorInventoryItemPickup>();
+                    if (!pickup.Configure(dungeonBuilder, entry.Item, cell))
+                    {
+                        Destroy(pickupObject);
+                        continue;
+                    }
+                }
+                else if (entry.Kind == LevelLootKind.AbilityOrb)
+                {
+                    var pickup = pickupObject.AddComponent<FloorAbilityQueuePickup>();
+                    if (!pickup.Configure(dungeonBuilder, entry.AbilityOrb, cell))
+                    {
+                        Destroy(pickupObject);
+                        continue;
+                    }
+                }
+                else
                 {
                     Destroy(pickupObject);
                     continue;
@@ -616,7 +655,9 @@ namespace CleanupCrawler.Levels
 
         private static int CountPickupsInScene()
         {
-            return FindObjectsByType<FloorInventoryItemPickup>(FindObjectsInactive.Exclude, FindObjectsSortMode.None).Length;
+            var inventory = FindObjectsByType<FloorInventoryItemPickup>(FindObjectsInactive.Exclude, FindObjectsSortMode.None).Length;
+            var orbs = FindObjectsByType<FloorAbilityQueuePickup>(FindObjectsInactive.Exclude, FindObjectsSortMode.None).Length;
+            return inventory + orbs;
         }
 
         private static T SelectWeightedEntry<T>(IReadOnlyList<T> entries, System.Func<T, bool> isValid, System.Func<T, int> getWeight)

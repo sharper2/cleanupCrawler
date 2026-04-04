@@ -35,6 +35,7 @@ namespace DungeonGenerator
         private float _activeAttackDamage;
         private float _activeAttackRange;
         private float _activeAttackSwipeWidth;
+        private int _activeGridKnockbackCells;
 
         private void Awake()
         {
@@ -61,6 +62,16 @@ namespace DungeonGenerator
             }
         }
 
+        public bool CanExecuteAttack(WeaponItemDefinition weapon)
+        {
+            if (weapon == null)
+            {
+                return false;
+            }
+
+            return Time.time >= _lastAttackTime + weapon.Cooldown;
+        }
+
         public bool TryExecuteAttack(WeaponItemDefinition weapon)
         {
             if (weapon == null)
@@ -68,7 +79,7 @@ namespace DungeonGenerator
                 return false;
             }
 
-            if (Time.time < _lastAttackTime + weapon.Cooldown)
+            if (!CanExecuteAttack(weapon))
             {
                 return false;
             }
@@ -143,6 +154,7 @@ namespace DungeonGenerator
             _activeAttackDamage = weapon.Damage;
             _activeAttackRange = weapon.Range;
             _activeAttackSwipeWidth = Mathf.Max(0.1f, swipeWidth);
+            _activeGridKnockbackCells = weapon.GridKnockbackCells;
             _damagedThisAttack.Clear();
 
             ProcessActiveAttack();
@@ -184,7 +196,7 @@ namespace DungeonGenerator
                 Physics.DefaultRaycastLayers,
                 QueryTriggerInteraction.Collide);
 
-            ApplyDamageForOverlaps(hitCount, _activeAttackDamage);
+            ApplyDamageForOverlaps(hitCount, _activeAttackDamage, _activeGridKnockbackCells);
             ShowAttackFeedback(origin, end, _activeAttackHasHit);
         }
 
@@ -210,14 +222,14 @@ namespace DungeonGenerator
                 Physics.DefaultRaycastLayers,
                 QueryTriggerInteraction.Collide);
 
-            ApplyDamageForOverlaps(hitCount, _activeAttackDamage);
+            ApplyDamageForOverlaps(hitCount, _activeAttackDamage, _activeGridKnockbackCells);
 
             var from = center - transform.right * halfWidth;
             var to = center + transform.right * halfWidth;
             ShowAttackFeedback(from, to, _activeAttackHasHit);
         }
 
-        private void ApplyDamageForOverlaps(int hitCount, float damage)
+        private void ApplyDamageForOverlaps(int hitCount, float damage, int gridKnockbackCells)
         {
             for (var i = 0; i < hitCount; i++)
             {
@@ -236,8 +248,38 @@ namespace DungeonGenerator
                 }
 
                 damageable.TakeDamage(damage);
+                TryApplyGridKnockback(damageable, gridKnockbackCells);
                 _activeAttackHasHit = true;
             }
+        }
+
+        private void TryApplyGridKnockback(IDamageable damageable, int cells)
+        {
+            if (cells <= 0)
+            {
+                return;
+            }
+
+            var health = damageable as HealthComponent;
+            if (health == null)
+            {
+                return;
+            }
+
+            var grid = health.GetComponent<DungeonGridPlayerController>()
+                ?? health.GetComponentInParent<DungeonGridPlayerController>();
+            if (grid == null)
+            {
+                return;
+            }
+
+            var enemyOccupant = GetComponent<StaticEnemy>();
+            if (enemyOccupant == null || !enemyOccupant.TryGetOccupiedCell(out var enemyCell))
+            {
+                return;
+            }
+
+            grid.TryKnockbackFromSourceCell(enemyCell, cells);
         }
 
         private void ShowAttackFeedback(Vector3 from, Vector3 to, bool hit)

@@ -9,11 +9,14 @@ namespace DungeonGenerator
         [SerializeField] private float range = 2f;
         [SerializeField] private float attackActiveDuration = 0.12f;
         [SerializeField] private float cooldown = 0.35f;
+        [Tooltip("Grid cells to push the player away when this weapon hits (melee/thrust/swipe only). Player weapons usually leave at 0.")]
+        [SerializeField, Min(0)] private int gridKnockbackCells;
 
         public float Damage => Mathf.Max(0f, damage);
         public float Range => Mathf.Max(0.1f, range);
         public float AttackActiveDuration => Mathf.Max(0.01f, attackActiveDuration);
         public float Cooldown => Mathf.Max(0.01f, cooldown);
+        public int GridKnockbackCells => gridKnockbackCells;
         public override EquipmentSlotType SlotType => EquipmentSlotType.Weapon;
 
         public override bool TryGetDamage(out float value)

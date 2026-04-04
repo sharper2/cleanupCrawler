@@ -8,10 +8,13 @@ namespace DungeonGenerator
         [SerializeField] private Sprite queueSprite;
         [SerializeField] private string displayName = "Orb";
         [SerializeField] private AbilityQueuePassiveSchedule passiveSchedule;
+        [Tooltip("Optional world model for FloorAbilityQueuePickup; if unset, the pickup has no mesh.")]
+        [SerializeField] private GameObject floorPickupModelPrefab;
 
         public Sprite QueueSprite => queueSprite;
         public string DisplayName => displayName;
-        public AbilityQueuePassiveSchedule PassiveSchedule => passiveSchedule;
+        public virtual AbilityQueuePassiveSchedule PassiveSchedule => passiveSchedule;
+        public GameObject FloorPickupModelPrefab => floorPickupModelPrefab;
 
         public virtual void OnPassiveProcced(AbilityQueueContext context)
         {
