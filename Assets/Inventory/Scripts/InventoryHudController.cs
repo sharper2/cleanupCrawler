@@ -28,6 +28,13 @@ public class InventoryHudController : MonoBehaviour
     [SerializeField] private float deleteZoneTopMargin = 10f;
     [SerializeField] private Color deleteZoneColor = new(0.45f, 0.12f, 0.12f, 0.8f);
     [SerializeField] private Color deleteZoneHoverColor = new(0.8f, 0.15f, 0.15f, 0.9f);
+    [SerializeField] private Vector2 tooltipOffset = new(18f, 18f);
+    [SerializeField] private Color tooltipBackgroundColor = new(0f, 0f, 0f, 0.9f);
+    [SerializeField] private Vector2 equipmentSlotSize = new(170f, 52f);
+    [SerializeField] private float equipmentSlotMargin = 16f;
+    [SerializeField] private float equipmentSlotGap = 8f;
+    [SerializeField] private Color equipmentSlotColor = new(0.12f, 0.12f, 0.12f, 0.85f);
+    [SerializeField] private Color equipmentSlotBorderColor = new(0.45f, 0.45f, 0.45f, 0.9f);
 
     [Header("Scene Gizmo")]
     [SerializeField] private bool drawSceneGizmo = true;
@@ -47,7 +54,10 @@ public class InventoryHudController : MonoBehaviour
     private bool _isHoveringGrid;
     private Vector2Int _hoveredOrigin;
     private bool _canDropAtHover;
-    private InventoryItemDefinition _lastClickedDefinition;
+    private InventoryItemInstance _lastClickedItem;
+    private InventoryItemInstance _equippedWeaponItem;
+    private InventoryItemInstance _equippedMagicItem;
+    private InventoryItemInstance _equippedMobilityItem;
     private float _lastClickTime = -999f;
 
     private const float DoubleClickThresholdSeconds = 0.3f;
@@ -63,7 +73,32 @@ public class InventoryHudController : MonoBehaviour
 
     public int Score => _score;
     public int LevelQuota => Mathf.Max(0, levelQuota);
-    public bool CanCompleteLevel => Score > LevelQuota;
+    public bool CanCompleteLevel => Score >= LevelQuota;
+
+    public void SetLevelQuota(int quota)
+    {
+        levelQuota = Mathf.Max(0, quota);
+    }
+
+    public void ResetScore()
+    {
+        _score = 0;
+    }
+
+    public void ClearAllItems()
+    {
+        EnsureGridInitialized();
+
+        TryClearEquippedItem(ref _equippedWeaponItem);
+        TryClearEquippedItem(ref _equippedMagicItem);
+        TryClearEquippedItem(ref _equippedMobilityItem);
+
+        var snapshot = new List<InventoryItemInstance>(_grid.Items);
+        for (var i = 0; i < snapshot.Count; i++)
+        {
+            _grid.RemoveItem(snapshot[i]);
+        }
+    }
 
     private void Awake()
     {
@@ -125,6 +160,8 @@ public class InventoryHudController : MonoBehaviour
 
         for (var i = 0; i < amount; i++)
         {
+            TryClearMatchingEquippedItem(matchingItems[i]);
+
             _grid.RemoveItem(matchingItems[i]);
         }
 
@@ -197,11 +234,110 @@ public class InventoryHudController : MonoBehaviour
         DrawGrid();
         DrawPlacedItems();
         DrawDeleteZone();
+        DrawEquipmentSlots();
+        DrawHoveredItemTooltip();
 
         if (_draggedItem != null)
         {
             DrawDragPreview();
         }
+    }
+
+    private void DrawHoveredItemTooltip()
+    {
+        if (_draggedItem != null)
+        {
+            return;
+        }
+
+        var mousePosition = GetGuiMousePosition();
+        if (!GridRect.Contains(mousePosition))
+        {
+            return;
+        }
+
+        var hoveredItem = _grid.GetItemAt(GuiToCell(mousePosition));
+        var definition = hoveredItem != null ? hoveredItem.Definition : null;
+        if (definition == null)
+        {
+            return;
+        }
+
+        var lines = BuildTooltipLines(definition);
+        if (lines.Count == 0)
+        {
+            return;
+        }
+
+        var style = GUI.skin.label;
+        var width = 120f;
+        var lineHeight = style.lineHeight > 0f ? style.lineHeight : 16f;
+
+        for (var i = 0; i < lines.Count; i++)
+        {
+            var size = style.CalcSize(new GUIContent(lines[i]));
+            if (size.x > width)
+            {
+                width = size.x;
+            }
+        }
+
+        var padding = 8f;
+        var tooltipRect = new Rect(
+            mousePosition.x + tooltipOffset.x,
+            mousePosition.y + tooltipOffset.y,
+            width + padding * 2f,
+            lineHeight * lines.Count + padding * 2f);
+
+        if (tooltipRect.xMax > Screen.width)
+        {
+            tooltipRect.x = mousePosition.x - tooltipRect.width - tooltipOffset.x;
+        }
+
+        if (tooltipRect.yMax > Screen.height)
+        {
+            tooltipRect.y = mousePosition.y - tooltipRect.height - tooltipOffset.y;
+        }
+
+        DrawRect(tooltipRect, tooltipBackgroundColor);
+        DrawBorder(tooltipRect, cellBorderColor, 1f);
+
+        var lineRect = new Rect(tooltipRect.x + padding, tooltipRect.y + padding, tooltipRect.width - padding * 2f, lineHeight);
+        for (var i = 0; i < lines.Count; i++)
+        {
+            GUI.Label(lineRect, lines[i]);
+            lineRect.y += lineHeight;
+        }
+    }
+
+    private static List<string> BuildTooltipLines(InventoryItemDefinition definition)
+    {
+        var lines = new List<string>();
+        lines.Add(definition.DisplayName);
+        lines.Add($"Value: {definition.Value}");
+
+        if (definition.TryGetDamage(out var damage))
+        {
+            lines.Add($"Damage: {damage:0.##}");
+        }
+
+        var attributes = definition.GetAttributeDescriptions();
+        if (attributes != null && attributes.Count > 0)
+        {
+            lines.Add("Attributes:");
+            for (var i = 0; i < attributes.Count; i++)
+            {
+                var attribute = attributes[i];
+                if (string.IsNullOrWhiteSpace(attribute))
+                {
+                    continue;
+                }
+
+                lines.Add($"- {attribute}");
+            }
+        }
+
+        return lines;
     }
 
     private void BeginDrag()
@@ -269,15 +405,15 @@ public class InventoryHudController : MonoBehaviour
         var cell = GuiToCell(mousePosition);
         var clickedItem = _grid.GetItemAt(cell);
         var clickedDefinition = clickedItem != null ? clickedItem.Definition : null;
-        if (clickedDefinition == null)
+        if (clickedDefinition == null || !clickedDefinition.TryGetEquipmentSlot(out var slot))
         {
             return false;
         }
 
-        var isDoubleClick = ReferenceEquals(clickedDefinition, _lastClickedDefinition)
+        var isDoubleClick = ReferenceEquals(clickedItem, _lastClickedItem)
             && Time.unscaledTime - _lastClickTime <= DoubleClickThresholdSeconds;
 
-        _lastClickedDefinition = clickedDefinition;
+        _lastClickedItem = clickedItem;
         _lastClickTime = Time.unscaledTime;
 
         if (!isDoubleClick)
@@ -285,12 +421,25 @@ public class InventoryHudController : MonoBehaviour
             return false;
         }
 
-        if (IsAssetEquipped(clickedDefinition))
+        ref var equippedSlotItem = ref GetEquippedSlotItemRef(slot);
+        if (ReferenceEquals(clickedItem, equippedSlotItem))
         {
-            return TryUnequipAsset(clickedDefinition);
+            if (!TryUnequipAsset(clickedDefinition))
+            {
+                return false;
+            }
+
+            equippedSlotItem = null;
+            return true;
         }
 
-        return TryEquipAsset(clickedDefinition);
+        if (!TryEquipAsset(clickedDefinition))
+        {
+            return false;
+        }
+
+        equippedSlotItem = clickedItem;
+        return true;
     }
 
     private static bool TryEquipAsset(Object itemAsset)
@@ -323,25 +472,6 @@ public class InventoryHudController : MonoBehaviour
         for (var i = 0; i < receivers.Length; i++)
         {
             if (receivers[i] is IEquipmentReceiver receiver && receiver.TryUnequipObject(itemAsset))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private static bool IsAssetEquipped(Object itemAsset)
-    {
-        if (itemAsset == null)
-        {
-            return false;
-        }
-
-        var receivers = FindObjectsByType<MonoBehaviour>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
-        for (var i = 0; i < receivers.Length; i++)
-        {
-            if (receivers[i] is IEquipmentReceiver receiver && receiver.IsEquippedObject(itemAsset))
             {
                 return true;
             }
@@ -387,6 +517,8 @@ public class InventoryHudController : MonoBehaviour
             return false;
         }
 
+        TryClearMatchingEquippedItem(_draggedItem);
+
         _score += _draggedItem.Definition.Value;
         return true;
     }
@@ -424,6 +556,117 @@ public class InventoryHudController : MonoBehaviour
         GUI.Label(scoreRect, $"Score: {Score} / Quota: {LevelQuota} {(CanCompleteLevel ? "(Ready)" : string.Empty)}");
     }
 
+    private void DrawEquipmentSlots()
+    {
+        DrawEquipmentSlot(EquipmentSlotType.Magic, GetLeftSlotRect(0), "Magic", "Shift");
+        DrawEquipmentSlot(EquipmentSlotType.Mobility, GetLeftSlotRect(1), "Mobility", "Ctrl");
+        DrawEquipmentSlot(EquipmentSlotType.Weapon, GetRightSlotRect(), "Weapon", "Space");
+    }
+
+    private void DrawEquipmentSlot(EquipmentSlotType slot, Rect rect, string label, string keyLabel)
+    {
+        DrawRect(rect, equipmentSlotColor);
+        DrawBorder(rect, equipmentSlotBorderColor, 1f);
+
+        var equippedItem = GetEquippedSlotItem(slot);
+        var definition = equippedItem != null ? equippedItem.Definition : null;
+        var itemName = definition != null ? definition.DisplayName : "(empty)";
+
+        var iconSize = rect.height - 12f;
+        var iconRect = new Rect(rect.x + 6f, rect.y + 6f, iconSize, iconSize);
+        var textX = iconRect.xMax + 6f;
+        var topRect = new Rect(textX, rect.y + 4f, rect.xMax - textX - 6f, 20f);
+        var bottomRect = new Rect(textX, rect.y + 24f, rect.xMax - textX - 6f, 20f);
+
+        if (definition != null && definition.Icon != null)
+        {
+            GUI.DrawTexture(iconRect, definition.Icon.texture, ScaleMode.ScaleToFit, true);
+        }
+        else
+        {
+            DrawRect(iconRect, new Color(0f, 0f, 0f, 0.35f));
+            DrawBorder(iconRect, equipmentSlotBorderColor, 1f);
+        }
+
+        GUI.Label(topRect, $"{label} [{keyLabel}]");
+        GUI.Label(bottomRect, itemName);
+    }
+
+    private Rect GetLeftSlotRect(int index)
+    {
+        var x = equipmentSlotMargin;
+        var y = Screen.height - equipmentSlotMargin - equipmentSlotSize.y * (2 - index) - equipmentSlotGap * (1 - index);
+        return new Rect(x, y, equipmentSlotSize.x, equipmentSlotSize.y);
+    }
+
+    private Rect GetRightSlotRect()
+    {
+        var x = Screen.width - equipmentSlotMargin - equipmentSlotSize.x;
+        var y = Screen.height - equipmentSlotMargin - equipmentSlotSize.y;
+        return new Rect(x, y, equipmentSlotSize.x, equipmentSlotSize.y);
+    }
+
+    private bool IsEquippedInstance(InventoryItemInstance item)
+    {
+        return ReferenceEquals(item, _equippedWeaponItem)
+            || ReferenceEquals(item, _equippedMagicItem)
+            || ReferenceEquals(item, _equippedMobilityItem);
+    }
+
+    private InventoryItemInstance GetEquippedSlotItem(EquipmentSlotType slot)
+    {
+        return slot switch
+        {
+            EquipmentSlotType.Weapon => _equippedWeaponItem,
+            EquipmentSlotType.Magic => _equippedMagicItem,
+            EquipmentSlotType.Mobility => _equippedMobilityItem,
+            _ => null
+        };
+    }
+
+    private ref InventoryItemInstance GetEquippedSlotItemRef(EquipmentSlotType slot)
+    {
+        switch (slot)
+        {
+            case EquipmentSlotType.Weapon:
+                return ref _equippedWeaponItem;
+            case EquipmentSlotType.Magic:
+                return ref _equippedMagicItem;
+            default:
+                return ref _equippedMobilityItem;
+        }
+    }
+
+    private void TryClearMatchingEquippedItem(InventoryItemInstance item)
+    {
+        if (ReferenceEquals(item, _equippedWeaponItem))
+        {
+            TryClearEquippedItem(ref _equippedWeaponItem);
+        }
+
+        if (ReferenceEquals(item, _equippedMagicItem))
+        {
+            TryClearEquippedItem(ref _equippedMagicItem);
+        }
+
+        if (ReferenceEquals(item, _equippedMobilityItem))
+        {
+            TryClearEquippedItem(ref _equippedMobilityItem);
+        }
+    }
+
+    private static void TryClearEquippedItem(ref InventoryItemInstance item)
+    {
+        if (item == null || item.Definition == null)
+        {
+            item = null;
+            return;
+        }
+
+        TryUnequipAsset(item.Definition);
+        item = null;
+    }
+
     private void DrawGrid()
     {
         var rect = GridRect;
@@ -451,7 +694,7 @@ public class InventoryHudController : MonoBehaviour
                 continue;
             }
 
-            var color = IsAssetEquipped(item.Definition) ? equippedItemColor : itemColor;
+            var color = IsEquippedInstance(item) ? equippedItemColor : itemColor;
             DrawItemCells(item, origin, color);
         }
     }

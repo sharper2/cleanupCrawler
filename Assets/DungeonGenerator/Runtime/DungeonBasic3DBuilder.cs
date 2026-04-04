@@ -25,16 +25,20 @@ namespace DungeonGenerator
         public float cellSize = 2f;
         public float floorHeight = 0.1f;
         public float wallHeight = 2f;
+        [Min(1)] public int corridorWidthCells = 1;
         public float connectionWidth = 0.35f;
         public Vector3 worldOffset = Vector3.zero;
 
         [Header("Prefabs / Materials")]
         public GameObject floorPrefab;
         public GameObject wallPrefab;
+        public GameObject ceilingPrefab;
         public Material floorMaterial;
         public Material wallMaterial;
+        public Material ceilingMaterial;
 
         [Header("Floor Items")]
+        public bool spawnFloorItems = true;
         public List<GameObject> floorItemPrefabs = new List<GameObject>();
         public int minFloorItemsPerRoom = 0;
         public int maxFloorItemsPerRoom = 2;
@@ -46,6 +50,7 @@ namespace DungeonGenerator
         public Color fallbackFloorColor = new Color(0.3f, 0.3f, 0.35f, 1f);
         public Color fallbackCorridorColor = new Color(0.5f, 0.7f, 0.55f, 1f);
         public Color fallbackWallColor = new Color(0.12f, 0.12f, 0.14f, 1f);
+        public Color fallbackCeilingColor = new Color(0.2f, 0.2f, 0.24f, 1f);
         public Color fallbackStartColor = new Color(0.2f, 0.8f, 0.2f, 1f);
         public Color fallbackExitColor = new Color(0.8f, 0.2f, 0.2f, 1f);
         public Color fallbackConnectionColor = new Color(0.35f, 0.65f, 0.95f, 1f);
@@ -61,6 +66,7 @@ namespace DungeonGenerator
         private Material _generatedFloorMaterial;
         private Material _generatedCorridorMaterial;
         private Material _generatedWallMaterial;
+        private Material _generatedCeilingMaterial;
         private Material _generatedStartMaterial;
         private Material _generatedExitMaterial;
         private Material _generatedConnectionMaterial;
@@ -123,8 +129,10 @@ namespace DungeonGenerator
             var floorCells = new HashSet<Vector2Int>(_walkableCells);
             var roomCells = BuildRoomCells(graph);
             CreateFloorObjects(floorCells, roomCells);
+            CreateCeilingObjects(floorCells);
             CreateWallObjects(floorCells);
-            CreateFloorItemObjects(graph, floorCells, roomCells);
+            if (spawnFloorItems)
+                CreateFloorItemObjects(graph, floorCells, roomCells);
         }
 
         public void ClearDungeon()
@@ -136,9 +144,9 @@ namespace DungeonGenerator
             if (_generatedRoot == null)
                 return;
 
-            while (_generatedRoot.childCount > 0)
+            for (int i = _generatedRoot.childCount - 1; i >= 0; i--)
             {
-                var child = _generatedRoot.GetChild(0).gameObject;
+                var child = _generatedRoot.GetChild(i).gameObject;
 
                 if (Application.isPlaying)
                     Destroy(child);
@@ -246,7 +254,7 @@ namespace DungeonGenerator
                     Vector2Int to = GetNodeCenterCell(other);
 
                     var corridorCells = new HashSet<Vector2Int>();
-                    AddCorridorCellsLShaped(corridorCells, from, to);
+                    AddCorridorCellsLShaped(corridorCells, from, to, Mathf.Max(1, corridorWidthCells));
 
                     var filteredCells = new List<Vector2Int>();
                     foreach (var cell in corridorCells)
@@ -417,7 +425,7 @@ namespace DungeonGenerator
                     Vector2Int from = GetNodeCenterCell(node);
                     Vector2Int to = GetNodeCenterCell(other);
 
-                    AddCorridorCellsLShaped(floorCells, from, to);
+                    AddCorridorCellsLShaped(floorCells, from, to, Mathf.Max(1, corridorWidthCells));
                 }
             }
 
@@ -448,18 +456,32 @@ namespace DungeonGenerator
             );
         }
 
-        private static void AddCorridorCellsLShaped(HashSet<Vector2Int> cells, Vector2Int from, Vector2Int to)
+        private static void AddCorridorCellsLShaped(HashSet<Vector2Int> cells, Vector2Int from, Vector2Int to, int width)
         {
+            int clampedWidth = Mathf.Max(1, width);
+            int radius = clampedWidth / 2;
+
+            void AddWideCell(Vector2Int center)
+            {
+                for (int ox = -radius; ox <= radius; ox++)
+                {
+                    for (int oy = -radius; oy <= radius; oy++)
+                    {
+                        cells.Add(new Vector2Int(center.x + ox, center.y + oy));
+                    }
+                }
+            }
+
             int stepX = from.x <= to.x ? 1 : -1;
             int stepY = from.y <= to.y ? 1 : -1;
 
             for (int x = from.x; x != to.x; x += stepX)
-                cells.Add(new Vector2Int(x, from.y));
-            cells.Add(new Vector2Int(to.x, from.y));
+                AddWideCell(new Vector2Int(x, from.y));
+            AddWideCell(new Vector2Int(to.x, from.y));
 
             for (int y = from.y; y != to.y; y += stepY)
-                cells.Add(new Vector2Int(to.x, y));
-            cells.Add(to);
+                AddWideCell(new Vector2Int(to.x, y));
+            AddWideCell(to);
         }
 
         private void CreateFloorObjects(HashSet<Vector2Int> floorCells, HashSet<Vector2Int> roomCells)
@@ -474,6 +496,20 @@ namespace DungeonGenerator
                 go.transform.position = CellCenterToWorld(cell, floorHeight * 0.5f);
 
                 Material material = roomCells.Contains(cell) ? roomMaterial : corridorMaterial;
+                ApplyMaterial(go, material);
+            }
+        }
+
+        private void CreateCeilingObjects(HashSet<Vector2Int> floorCells)
+        {
+            Material material = ResolveMaterial(ceilingMaterial, fallbackCeilingColor, ref _generatedCeilingMaterial, "Generated_DungeonCeilingMaterial");
+            float ceilingY = Mathf.Max(floorHeight * 0.5f, wallHeight - floorHeight * 0.5f);
+
+            foreach (var cell in floorCells)
+            {
+                var go = CreateTileObject(ceilingPrefab != null ? ceilingPrefab : floorPrefab, "Ceiling", cell);
+                go.transform.localScale = new Vector3(cellSize, floorHeight, cellSize);
+                go.transform.position = CellCenterToWorld(cell, ceilingY);
                 ApplyMaterial(go, material);
             }
         }

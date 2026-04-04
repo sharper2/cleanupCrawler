@@ -48,6 +48,16 @@ namespace DungeonGenerator
             _currentHealth = Mathf.Min(MaxHealth, _currentHealth + amount);
         }
 
+        public void SetCurrentHealth(float value)
+        {
+            _currentHealth = Mathf.Clamp(value, 0f, MaxHealth);
+
+            if (_currentHealth <= 0f)
+            {
+                OnDied();
+            }
+        }
+
         private void OnDied()
         {
             if (destroyOnDeath)

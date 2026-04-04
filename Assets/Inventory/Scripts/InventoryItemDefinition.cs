@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using DungeonGenerator;
 using UnityEngine;
 
 [CreateAssetMenu(fileName = "InventoryItem", menuName = "Inventory/Item Definition")]
@@ -7,6 +8,8 @@ public class InventoryItemDefinition : ScriptableObject
 {
     [SerializeField] private string displayName = "Item";
     [SerializeField] private Sprite icon;
+    [SerializeField] private GameObject floorModelPrefab;
+    [SerializeField] private GameObject heldModelPrefab;
     [SerializeField] private int value = 1;
     [SerializeField] private List<RectInt> shapeRectangles = new() { new RectInt(0, 0, 1, 1) };
     [SerializeField] private List<Vector2Int> shapeOffsets = new() { Vector2Int.zero };
@@ -15,7 +18,26 @@ public class InventoryItemDefinition : ScriptableObject
 
     public string DisplayName => displayName;
     public Sprite Icon => icon;
+    public GameObject FloorModelPrefab => floorModelPrefab;
+    public GameObject HeldModelPrefab => heldModelPrefab;
     public int Value => Mathf.Max(0, value);
+
+    public virtual bool TryGetDamage(out float damage)
+    {
+        damage = 0f;
+        return false;
+    }
+
+    public virtual IReadOnlyList<string> GetAttributeDescriptions()
+    {
+        return Array.Empty<string>();
+    }
+
+    public virtual bool TryGetEquipmentSlot(out EquipmentSlotType slot)
+    {
+        slot = default;
+        return false;
+    }
 
     public IReadOnlyList<Vector2Int> GetOccupiedOffsets(int rotationSteps)
     {

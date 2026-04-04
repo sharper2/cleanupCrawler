@@ -1,6 +1,6 @@
 ﻿<Solution>
-  <Project Path="DungeonGenerator.Tests.csproj" />
   <Project Path="Assembly-CSharp.csproj" />
+  <Project Path="DungeonGenerator.Tests.csproj" />
   <Project Path="Inventory.csproj" />
   <Project Path="Assembly-CSharp-Editor.csproj" />
   <Project Path="DungeonGenerator.Runtime.csproj" />

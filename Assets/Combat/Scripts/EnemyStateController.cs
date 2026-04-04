@@ -31,6 +31,7 @@ namespace DungeonGenerator
         [Header("Threat Detection")]
         [SerializeField] private float threatScanRadius = 10f;
         [SerializeField] private float loseThreatDistance = 20f;
+        [SerializeField] private float threatScanInterval = 0.1f;
         [SerializeField] private LayerMask threatLayerMask = ~0;
 
         [Header("Combat")]
@@ -39,6 +40,8 @@ namespace DungeonGenerator
 
         private readonly Collider[] _threatBuffer = new Collider[32];
         private readonly RaycastHit[] _lineOfSightBuffer = new RaycastHit[16];
+        private readonly Dictionary<Collider, IThreat> _threatByColliderCache = new Dictionary<Collider, IThreat>();
+        private readonly HashSet<Transform> _threatScanVisited = new HashSet<Transform>();
         private readonly HashSet<Vector2Int> _roamRegionCells = new HashSet<Vector2Int>();
         private readonly HashSet<Vector2Int> _roamCells = new HashSet<Vector2Int>();
         private readonly List<Vector2Int> _adjacentCandidates = new List<Vector2Int>(4);
@@ -52,9 +55,21 @@ namespace DungeonGenerator
         private bool _moveKeepSnappedBefore;
         private Vector2Int _currentDirection;
         private int _remainingStraightSteps;
+        private Vector2Int _homeCell;
+        private bool _hasHomeCell;
+        private int _stuckMoveAttempts;
+        private float _nextThreatScanAt;
+
+        private const int MaxStuckMoveAttempts = 3;
+        private const int MaxPathSearchNodes = 512;
 
         public EnemyState State => _state;
         public IThreat SpottedThreat { get; private set; }
+
+        public void SetAttackType(WeaponItemDefinition weapon)
+        {
+            attackType = weapon;
+        }
 
         private void Awake()
         {
@@ -65,6 +80,11 @@ namespace DungeonGenerator
         private void Start()
         {
             RebuildRoamArea();
+            if (_enemy != null && _enemy.TryGetOccupiedCell(out var spawnCell))
+            {
+                _homeCell = spawnCell;
+                _hasHomeCell = true;
+            }
             _nextMoveAt = Time.time + Mathf.Max(0.05f, roamingMoveInterval);
         }
 
@@ -107,6 +127,7 @@ namespace DungeonGenerator
             if (TrySpotThreat(out var threat))
             {
                 SpottedThreat = threat;
+                _stuckMoveAttempts = 0;
                 _state = attackType is RangedWeaponItemDefinition ? EnemyState.RangedChasing : EnemyState.CloseChasing;
                 _nextMoveAt = Time.time + Mathf.Max(0.05f, chasingMoveInterval);
                 return;
@@ -142,7 +163,18 @@ namespace DungeonGenerator
                 return;
 
             _nextMoveAt = Time.time + Mathf.Max(0.05f, chasingMoveInterval);
-            TryMoveTowardThreat(SpottedThreat.ThreatTransform.position);
+            if (TryMoveTowardThreat(SpottedThreat.ThreatTransform.position))
+            {
+                _stuckMoveAttempts = 0;
+                return;
+            }
+
+            _stuckMoveAttempts++;
+            if (_stuckMoveAttempts >= MaxStuckMoveAttempts)
+            {
+                TryMoveTowardHomeCell();
+                _stuckMoveAttempts = 0;
+            }
         }
 
         private void UpdateCloseAttacking()
@@ -181,6 +213,7 @@ namespace DungeonGenerator
             {
                 CancelMovement();
                 FaceDirection(shotDirection);
+                _stuckMoveAttempts = 0;
                 _state = EnemyState.RangedAttacking;
                 return;
             }
@@ -191,7 +224,18 @@ namespace DungeonGenerator
                 return;
 
             _nextMoveAt = Time.time + Mathf.Max(0.05f, chasingMoveInterval);
-            TryMoveForRangedLineOfSight(threatPosition, range, SpottedThreat.ThreatTransform);
+            if (TryMoveForRangedLineOfSight(threatPosition, range, SpottedThreat.ThreatTransform))
+            {
+                _stuckMoveAttempts = 0;
+                return;
+            }
+
+            _stuckMoveAttempts++;
+            if (_stuckMoveAttempts >= MaxStuckMoveAttempts)
+            {
+                TryMoveTowardHomeCell();
+                _stuckMoveAttempts = 0;
+            }
         }
 
         private void UpdateRangedAttacking()
@@ -221,6 +265,7 @@ namespace DungeonGenerator
             _state = EnemyState.Roaming;
             _currentDirection = Vector2Int.zero;
             _remainingStraightSteps = 0;
+            _stuckMoveAttempts = 0;
         }
 
         private bool ShouldLoseThreat(IThreat threat)
@@ -303,6 +348,9 @@ namespace DungeonGenerator
             {
                 _roamCells.Add(startCell);
             }
+
+            _homeCell = startCell;
+            _hasHomeCell = true;
         }
 
         private bool IsRoamRegionCell(Vector2Int cell)
@@ -428,11 +476,17 @@ namespace DungeonGenerator
             return !GridCellOccupantRegistry.IsCellOccupied(cell);
         }
 
-        private void TryMoveTowardThreat(Vector3 threatPosition)
+        private bool TryMoveTowardThreat(Vector3 threatPosition)
         {
             if (_isMoving || _enemy == null || !_enemy.TryGetOccupiedCell(out var currentCell))
             {
-                return;
+                return false;
+            }
+
+            if (_enemy.DungeonBuilder != null && _enemy.DungeonBuilder.TryWorldToCell(threatPosition, out var threatCell) && TryGetNextChasePathStep(currentCell, threatCell, out var nextPathCell))
+            {
+                StartMoveToCell(nextPathCell, chasingMoveDuration);
+                return true;
             }
 
             bool hasCandidate = false;
@@ -459,14 +513,17 @@ namespace DungeonGenerator
             if (hasCandidate)
             {
                 StartMoveToCell(bestCell, chasingMoveDuration);
+                return true;
             }
+
+            return false;
         }
 
-        private void TryMoveForRangedLineOfSight(Vector3 threatPosition, float range, Transform threatTransform)
+        private bool TryMoveForRangedLineOfSight(Vector3 threatPosition, float range, Transform threatTransform)
         {
             if (_isMoving || _enemy == null || !_enemy.TryGetOccupiedCell(out var currentCell))
             {
-                return;
+                return false;
             }
 
             bool hasCandidate = false;
@@ -508,7 +565,89 @@ namespace DungeonGenerator
             if (hasCandidate)
             {
                 StartMoveToCell(bestCell, chasingMoveDuration);
+                return true;
             }
+
+            return false;
+        }
+
+        private bool TryMoveTowardHomeCell()
+        {
+            if (!_hasHomeCell || _isMoving || _enemy == null || !_enemy.TryGetOccupiedCell(out var currentCell))
+            {
+                return false;
+            }
+
+            if (!TryGetNextChasePathStep(currentCell, _homeCell, out var nextCell))
+            {
+                return false;
+            }
+
+            StartMoveToCell(nextCell, chasingMoveDuration);
+            return true;
+        }
+
+        private bool TryGetNextChasePathStep(Vector2Int startCell, Vector2Int targetCell, out Vector2Int nextCell)
+        {
+            nextCell = startCell;
+
+            if (startCell == targetCell)
+            {
+                return false;
+            }
+
+            var queue = new Queue<Vector2Int>();
+            var visited = new HashSet<Vector2Int>();
+            var firstStepByCell = new Dictionary<Vector2Int, Vector2Int>();
+
+            queue.Enqueue(startCell);
+            visited.Add(startCell);
+            firstStepByCell[startCell] = startCell;
+
+            int bestDistance = Mathf.Abs(startCell.x - targetCell.x) + Mathf.Abs(startCell.y - targetCell.y);
+            Vector2Int bestCell = startCell;
+            int explored = 0;
+
+            while (queue.Count > 0 && explored < MaxPathSearchNodes)
+            {
+                var current = queue.Dequeue();
+                explored++;
+
+                for (var i = 0; i < 4; i++)
+                {
+                    var neighbor = current + GetDirection(i);
+                    if (visited.Contains(neighbor) || !CanMoveToChaseCell(neighbor))
+                    {
+                        continue;
+                    }
+
+                    visited.Add(neighbor);
+                    firstStepByCell[neighbor] = current == startCell ? neighbor : firstStepByCell[current];
+
+                    int distance = Mathf.Abs(neighbor.x - targetCell.x) + Mathf.Abs(neighbor.y - targetCell.y);
+                    if (distance < bestDistance)
+                    {
+                        bestDistance = distance;
+                        bestCell = neighbor;
+                    }
+
+                    if (neighbor == targetCell)
+                    {
+                        nextCell = firstStepByCell[neighbor];
+                        return true;
+                    }
+
+                    queue.Enqueue(neighbor);
+                }
+            }
+
+            if (bestCell != startCell)
+            {
+                nextCell = firstStepByCell[bestCell];
+                return true;
+            }
+
+            return false;
         }
 
         private static float HorizontalDistance(Vector3 a, Vector3 b)
@@ -748,12 +887,23 @@ namespace DungeonGenerator
         {
             threat = null;
 
+            if (Time.time < _nextThreatScanAt)
+            {
+                return false;
+            }
+
+            _nextThreatScanAt = Time.time + Mathf.Max(0.01f, threatScanInterval);
+
             var hitCount = Physics.OverlapSphereNonAlloc(
                 GetEnemyReferencePosition(),
                 Mathf.Max(0.1f, threatScanRadius),
                 _threatBuffer,
                 threatLayerMask,
                 QueryTriggerInteraction.Collide);
+
+            float bestDistanceSq = float.MaxValue;
+            Vector3 enemyPos = GetEnemyReferencePosition();
+            _threatScanVisited.Clear();
 
             for (var i = 0; i < hitCount; i++)
             {
@@ -764,17 +914,58 @@ namespace DungeonGenerator
                     continue;
                 }
 
-                var candidate = collider.GetComponentInParent<IThreat>();
-                if (candidate == null || !candidate.IsThreatTo(gameObject))
+                if (!TryResolveThreat(collider, out var candidate) || candidate == null)
+                {
+                    continue;
+                }
+
+                var threatTransform = candidate.ThreatTransform;
+                if (threatTransform == null)
+                {
+                    _threatByColliderCache.Remove(collider);
+                    continue;
+                }
+
+                if (!_threatScanVisited.Add(threatTransform))
+                {
+                    continue;
+                }
+
+                if (!candidate.IsThreatTo(gameObject))
+                {
+                    continue;
+                }
+
+                Vector3 delta = threatTransform.position - enemyPos;
+                delta.y = 0f;
+                float distanceSq = delta.sqrMagnitude;
+                if (distanceSq >= bestDistanceSq)
+                {
+                    continue;
+                }
+
+                if (!HasLineOfSightFrom(enemyPos, threatTransform.position, threatTransform))
                 {
                     continue;
                 }
 
                 threat = candidate;
-                return true;
+                bestDistanceSq = distanceSq;
             }
 
-            return false;
+            return threat != null;
+        }
+
+        private bool TryResolveThreat(Collider collider, out IThreat threat)
+        {
+            if (_threatByColliderCache.TryGetValue(collider, out threat))
+            {
+                return threat != null;
+            }
+
+            threat = collider.GetComponentInParent<IThreat>();
+            _threatByColliderCache[collider] = threat;
+            return threat != null;
         }
 
         private static Vector2Int GetDirection(int index)

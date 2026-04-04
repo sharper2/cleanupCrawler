@@ -3,7 +3,7 @@ using UnityEngine;
 
 namespace DungeonGenerator
 {
-    public class DungeonGridPlayerController : MonoBehaviour
+    public class DungeonGridPlayerController : MonoBehaviour, IGridCellOccupant
     {
         [Header("References")]
         public DungeonBasic3DBuilder dungeonBuilder;
@@ -53,6 +53,48 @@ namespace DungeonGenerator
                 SnapToStart();
             else
                 ResolveCurrentCell();
+        }
+
+        public bool TryTeleportToCell(Vector2Int cell)
+        {
+            if (dungeonBuilder == null || !dungeonBuilder.IsCellWalkable(cell))
+            {
+                return false;
+            }
+
+            _queuedMove = Vector2Int.zero;
+            _queuedTurn = 0;
+            _isMoving = false;
+            _isTurning = false;
+
+            _currentCell = cell;
+            _hasCurrentCell = true;
+            _nextStepAllowedAt = Time.time;
+
+            SetAnchorWorldPosition(dungeonBuilder.CellCenterToWorld(cell, yOffset));
+            return true;
+        }
+
+        private void OnEnable()
+        {
+            GridCellOccupantRegistry.Register(this);
+        }
+
+        private void OnDisable()
+        {
+            GridCellOccupantRegistry.Unregister(this);
+        }
+
+        public bool TryGetOccupiedCell(out Vector2Int cell)
+        {
+            if (!_hasCurrentCell && !ResolveCurrentCell())
+            {
+                cell = default;
+                return false;
+            }
+
+            cell = _currentCell;
+            return true;
         }
 
         private void Update()

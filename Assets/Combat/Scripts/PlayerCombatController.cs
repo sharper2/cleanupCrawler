@@ -7,12 +7,19 @@ namespace DungeonGenerator
         [SerializeField] private PlayerEquipment equipment;
         [SerializeField] private CombatAttackController attackController;
         [SerializeField] private KeyCode attackKey = KeyCode.Mouse0;
+        [SerializeField] private KeyCode magicActivationKey = KeyCode.LeftShift;
+        [SerializeField] private KeyCode mobilityActivationKey = KeyCode.LeftControl;
 
         private void Awake()
         {
             if (equipment == null)
             {
                 equipment = GetComponent<PlayerEquipment>();
+            }
+
+            if (GetComponent<ManaComponent>() == null)
+            {
+                gameObject.AddComponent<ManaComponent>();
             }
 
             if (attackController == null)
@@ -23,6 +30,19 @@ namespace DungeonGenerator
 
         private void Update()
         {
+            if (equipment != null)
+            {
+                if (Input.GetKeyDown(magicActivationKey))
+                {
+                    equipment.TryActivateSlot(EquipmentSlotType.Magic, gameObject);
+                }
+
+                if (Input.GetKeyDown(mobilityActivationKey))
+                {
+                    equipment.TryActivateSlot(EquipmentSlotType.Mobility, gameObject);
+                }
+            }
+
             if (!Input.GetKeyDown(attackKey))
             {
                 return;
