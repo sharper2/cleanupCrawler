@@ -5,7 +5,7 @@ using UnityEngine;
 namespace DungeonGenerator
 {
     /// <summary>
-    /// Briefly tints mesh / skinned model materials when <see cref="HealthComponent"/> takes damage.
+    /// Briefly tints renderers when <see cref="HealthComponent"/> takes damage (mesh, skinned mesh, or <see cref="SpriteRenderer"/>).
     /// Uses <see cref="MaterialPropertyBlock"/> so shared materials are not duplicated.
     /// </summary>
     public sealed class DamageModelFlash : MonoBehaviour

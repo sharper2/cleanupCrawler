@@ -215,6 +215,11 @@ namespace DungeonGenerator
 
         private void Update()
         {
+            if (GameplayPause.IsPaused)
+            {
+                return;
+            }
+
             if (Input.GetKeyDown(evokeKey))
             {
                 TryEvokeFront();
@@ -312,6 +317,19 @@ namespace DungeonGenerator
             _queue.Insert(0, new QueuedEntry { InstanceId = id, Item = item, AttackStackDamage = 0f });
             RaiseQueueChanged();
             return true;
+        }
+
+        /// <summary>Removes every orb without firing <see cref="IAbilityQueueItem.OnEvoked"/>. Use on player death or full queue reset.</summary>
+        public void ClearQueue()
+        {
+            if (_queue.Count == 0)
+            {
+                return;
+            }
+
+            _queue.Clear();
+            _invulnerableUntilUnscaled = 0f;
+            RaiseQueueChanged();
         }
 
         /// <summary>Removes the front orb (rightmost) without firing <see cref="IAbilityQueueItem.OnEvoked"/>.</summary>

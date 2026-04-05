@@ -3,7 +3,7 @@ using UnityEngine;
 namespace DungeonGenerator
 {
     /// <summary>
-    /// Temporary tint on enemy renderers during attack windup (placeholder for animation telegraph).
+    /// Temporary tint on enemy renderers during attack windup (meshes or <see cref="SpriteRenderer"/>).
     /// </summary>
     public static class EnemyAttackTelegraphTint
     {

@@ -81,6 +81,7 @@ namespace DungeonGenerator
         public void BuildDungeon()
         {
             ClearDungeon();
+            InvalidateGeneratedMaterialCache();
 
             if (settings == null)
                 settings = new GeneratorSettings();
@@ -134,6 +135,39 @@ namespace DungeonGenerator
             CreateBorderWallObjects();
             if (spawnFloorItems)
                 CreateFloorItemObjects(graph, floorCells, roomCells);
+        }
+
+        /// <summary>
+        /// Clears cached Lit materials so the next build picks up current fallback colors (e.g. after a level profile change).
+        /// </summary>
+        public void InvalidateGeneratedMaterialCache()
+        {
+            DestroyGeneratedMaterial(ref _generatedFloorMaterial);
+            DestroyGeneratedMaterial(ref _generatedCorridorMaterial);
+            DestroyGeneratedMaterial(ref _generatedWallMaterial);
+            DestroyGeneratedMaterial(ref _generatedCeilingMaterial);
+            DestroyGeneratedMaterial(ref _generatedStartMaterial);
+            DestroyGeneratedMaterial(ref _generatedExitMaterial);
+            DestroyGeneratedMaterial(ref _generatedConnectionMaterial);
+        }
+
+        private static void DestroyGeneratedMaterial(ref Material material)
+        {
+            if (material == null)
+            {
+                return;
+            }
+
+            if (Application.isPlaying)
+            {
+                Destroy(material);
+            }
+            else
+            {
+                DestroyImmediate(material);
+            }
+
+            material = null;
         }
 
         public void ClearDungeon()

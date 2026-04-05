@@ -1,9 +1,16 @@
 using System.Collections.Generic;
+using CleanupCrawler.UI;
 using DungeonGenerator;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 namespace CleanupCrawler.Levels
 {
+    /// <summary>
+    /// Builds the dungeon from <see cref="DungeonBasic3DBuilder"/> + <see cref="LevelSetupProfile"/>.
+    /// The profile drives generator settings (grid, room count, loop chance), optional fallback colors,
+    /// and spawn/quota data. Populate the level profiles list for an ordered run (exit advances; last exit loads the title scene with a pending victory presentation).
+    /// </summary>
     public class LevelController : MonoBehaviour
     {
         [Header("References")]
@@ -12,6 +19,12 @@ namespace CleanupCrawler.Levels
         [SerializeField] private Transform playerTransform;
         [SerializeField] private InventoryHudController playerInventory;
         [SerializeField] private LevelSetupProfile setupProfile;
+
+        [Header("Level progression")]
+        [Tooltip("Ordered list (e.g. level 1–4). When empty, exit rebuilds using Setup Profile only (legacy). When set, exit advances to the next profile; exiting the last profile loads the title scene (see Title Scene Name).")]
+        [SerializeField] private List<LevelSetupProfile> levelProfiles = new();
+        [Tooltip("Loaded after clearing the final level in Level Profiles. Must match the title scene in Build Settings.")]
+        [SerializeField] private string titleSceneName = "title";
 
         [Header("Extensibility")]
         [SerializeField] private List<MonoBehaviour> decorationPlacers = new();
@@ -33,8 +46,21 @@ namespace CleanupCrawler.Levels
 
         private readonly List<GameObject> _spawnedRuntimeObjects = new();
         private bool _isBuildingLevel;
+        private int _levelProfileIndex;
+
+        private bool _dungeonFallbackColorsCached;
+        private Color _builderDefaultFloorColor;
+        private Color _builderDefaultCorridorColor;
+        private Color _builderDefaultWallColor;
+        private Color _builderDefaultCeilingColor;
 
         public LevelBuildContext LastBuildContext { get; private set; }
+
+        /// <summary>Assign the next level profile, then call <see cref="BuildLevel"/> (e.g. from exit).</summary>
+        public void SetSetupProfile(LevelSetupProfile profile)
+        {
+            setupProfile = profile;
+        }
 
         private void Awake()
         {
@@ -58,6 +84,14 @@ namespace CleanupCrawler.Levels
             if (playerInventory == null)
             {
                 playerInventory = FindFirstObjectByType<InventoryHudController>();
+            }
+
+            CacheDungeonBuilderFallbackColorsIfNeeded();
+
+            if (levelProfiles != null && levelProfiles.Count > 0)
+            {
+                _levelProfileIndex = 0;
+                setupProfile = levelProfiles[0];
             }
         }
 
@@ -106,7 +140,31 @@ namespace CleanupCrawler.Levels
             var health = ResolvePlayerHealthComponent();
             var healthBefore = health != null ? health.CurrentHealth : 0f;
 
-            BuildLevel(!preserveInventoryOnExit);
+            if (levelProfiles != null && levelProfiles.Count > 0)
+            {
+                if (_levelProfileIndex < levelProfiles.Count - 1)
+                {
+                    _levelProfileIndex++;
+                    setupProfile = levelProfiles[_levelProfileIndex];
+                    BuildLevel(!preserveInventoryOnExit);
+                }
+                else
+                {
+                    if (string.IsNullOrEmpty(titleSceneName))
+                    {
+                        Debug.LogWarning("[LevelController] Final level cleared but Title Scene Name is empty.");
+                        return true;
+                    }
+
+                    TitleFlowPendingVictory.MarkPending();
+                    SceneManager.LoadScene(titleSceneName, LoadSceneMode.Single);
+                    return true;
+                }
+            }
+            else
+            {
+                BuildLevel(!preserveInventoryOnExit);
+            }
 
             if (health != null)
             {
@@ -147,6 +205,7 @@ namespace CleanupCrawler.Levels
                 ClearSpawnedRuntimeObjects();
                 LogStep("Cleared previous runtime objects", ref stepTime);
 
+                ApplyDungeonProfileToBuilder();
                 RandomizeSeedIfNeeded();
                 if (disableBuilderFloorItems)
                 {
@@ -221,6 +280,58 @@ namespace CleanupCrawler.Levels
             finally
             {
                 _isBuildingLevel = false;
+            }
+        }
+
+        private void CacheDungeonBuilderFallbackColorsIfNeeded()
+        {
+            if (_dungeonFallbackColorsCached || dungeonBuilder == null)
+            {
+                return;
+            }
+
+            _builderDefaultFloorColor = dungeonBuilder.fallbackFloorColor;
+            _builderDefaultCorridorColor = dungeonBuilder.fallbackCorridorColor;
+            _builderDefaultWallColor = dungeonBuilder.fallbackWallColor;
+            _builderDefaultCeilingColor = dungeonBuilder.fallbackCeilingColor;
+            _dungeonFallbackColorsCached = true;
+        }
+
+        private void ApplyDungeonProfileToBuilder()
+        {
+            if (dungeonBuilder == null || setupProfile == null)
+            {
+                return;
+            }
+
+            CacheDungeonBuilderFallbackColorsIfNeeded();
+
+            if (dungeonBuilder.settings == null)
+            {
+                dungeonBuilder.settings = new GeneratorSettings();
+            }
+
+            var s = dungeonBuilder.settings;
+            s.gridSize = setupProfile.DungeonGridSize;
+            s.minRooms = setupProfile.DungeonMinRooms;
+            s.maxRooms = setupProfile.DungeonMaxRooms;
+            s.minRoomSize = setupProfile.DungeonMinRoomSize;
+            s.maxRoomSize = setupProfile.DungeonMaxRoomSize;
+            s.loopProbability = setupProfile.DungeonLoopProbability;
+
+            if (setupProfile.ApplyDungeonColorsFromProfile)
+            {
+                dungeonBuilder.fallbackFloorColor = setupProfile.DungeonFloorColor;
+                dungeonBuilder.fallbackCorridorColor = setupProfile.DungeonCorridorColor;
+                dungeonBuilder.fallbackWallColor = setupProfile.DungeonWallColor;
+                dungeonBuilder.fallbackCeilingColor = setupProfile.DungeonCeilingColor;
+            }
+            else
+            {
+                dungeonBuilder.fallbackFloorColor = _builderDefaultFloorColor;
+                dungeonBuilder.fallbackCorridorColor = _builderDefaultCorridorColor;
+                dungeonBuilder.fallbackWallColor = _builderDefaultWallColor;
+                dungeonBuilder.fallbackCeilingColor = _builderDefaultCeilingColor;
             }
         }
 

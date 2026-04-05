@@ -182,6 +182,11 @@ public class InventoryHudController : MonoBehaviour
 
     private void Update()
     {
+        if (GameplayPause.IsPaused)
+        {
+            return;
+        }
+
         if (GetToggleKeyDown())
         {
             _isVisible = !_isVisible;
@@ -226,7 +231,7 @@ public class InventoryHudController : MonoBehaviour
 
     private void OnGUI()
     {
-        if (!_isVisible || _grid == null)
+        if (GameplayPause.IsPaused || !_isVisible || _grid == null)
         {
             return;
         }

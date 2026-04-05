@@ -17,6 +17,11 @@ namespace DungeonGenerator
         /// <summary>Invoked after health is reduced by a positive damage amount.</summary>
         public event Action<float> DamageTaken;
 
+        /// <summary>Invoked once when health reaches zero (before optional destroy).</summary>
+        public event Action Died;
+
+        private bool _deathEventRaised;
+
         private void Awake()
         {
             _currentHealth = MaxHealth;
@@ -69,6 +74,11 @@ namespace DungeonGenerator
         {
             _currentHealth = Mathf.Clamp(value, 0f, MaxHealth);
 
+            if (_currentHealth > 0f)
+            {
+                _deathEventRaised = false;
+            }
+
             if (_currentHealth <= 0f)
             {
                 OnDied();
@@ -77,6 +87,14 @@ namespace DungeonGenerator
 
         private void OnDied()
         {
+            if (_deathEventRaised)
+            {
+                return;
+            }
+
+            _deathEventRaised = true;
+            Died?.Invoke();
+
             if (destroyOnDeath)
             {
                 Destroy(gameObject);

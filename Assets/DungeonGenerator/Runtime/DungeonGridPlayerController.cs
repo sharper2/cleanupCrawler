@@ -63,12 +63,7 @@ namespace DungeonGenerator
                 return false;
             }
 
-            StopAllCoroutines();
-
-            _queuedMove = Vector2Int.zero;
-            _queuedTurn = 0;
-            _isMoving = false;
-            _isTurning = false;
+            CancelActiveGridMotion();
 
             _currentCell = cell;
             _hasCurrentCell = true;
@@ -89,18 +84,27 @@ namespace DungeonGenerator
                 return;
             }
 
-            StopAllCoroutines();
-
-            _queuedMove = Vector2Int.zero;
-            _queuedTurn = 0;
-            _isMoving = false;
-            _isTurning = false;
+            CancelActiveGridMotion();
 
             _currentCell = cell;
             _hasCurrentCell = true;
             _nextStepAllowedAt = Time.time;
 
             SetAnchorWorldPosition(dungeonBuilder.CellCenterToWorld(cell, yOffset));
+        }
+
+        /// <summary>
+        /// Stops move/turn coroutines and clears flags. Snaps yaw to the current logical facing so a turn interrupted
+        /// mid-slerp cannot leave rotation out of sync with grid movement (which would block or confuse input).
+        /// </summary>
+        private void CancelActiveGridMotion()
+        {
+            StopAllCoroutines();
+            _queuedMove = Vector2Int.zero;
+            _queuedTurn = 0;
+            _isMoving = false;
+            _isTurning = false;
+            ApplyFacingRotation();
         }
 
         /// <summary>
@@ -115,11 +119,7 @@ namespace DungeonGenerator
                 return false;
             }
 
-            StopAllCoroutines();
-            _queuedMove = Vector2Int.zero;
-            _queuedTurn = 0;
-            _isMoving = false;
-            _isTurning = false;
+            CancelActiveGridMotion();
 
             SnapAnchorToNearestWalkableCell();
 
@@ -246,6 +246,11 @@ namespace DungeonGenerator
 
         private void Update()
         {
+            if (GameplayPause.IsPaused)
+            {
+                return;
+            }
+
             if (_isMoving || _isTurning || dungeonBuilder == null)
                 return;
 
@@ -319,7 +324,7 @@ namespace DungeonGenerator
             if (dungeonBuilder == null)
                 return;
 
-            StopAllCoroutines();
+            CancelActiveGridMotion();
 
             EnsureDungeonReady(true);
 

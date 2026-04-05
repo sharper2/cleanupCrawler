@@ -10,21 +10,27 @@ namespace DungeonGenerator
     /// </summary>
     public sealed class AbilityQueueHud : MonoBehaviour
     {
+        private const int OrbNameFontSizeMin = 1;
+        private const int OrbNameFontSizeMax = 24;
+        private const int PassiveBadgeFontSizeMin = 1;
+        private const int PassiveBadgeFontSizeMax = 20;
+
         [SerializeField] private AbilityQueueComponent queue;
         [SerializeField] private float topMargin = 16f;
         [SerializeField] private Vector2 iconSize = new(48f, 48f);
         [SerializeField] private float slotSpacing = 8f;
-        [SerializeField] private float nameHeight = 22f;
+        [SerializeField] private float nameHeight = 18f;
         [Header("Orb appearance")]
         [SerializeField] private Color orbBackgroundColor = new(0.35f, 0.75f, 1f, 0.55f);
         [SerializeField] private Color emptySlotOutlineColor = new(0.5f, 0.55f, 0.6f, 0.9f);
         [SerializeField] private Color orbLabelColor = Color.white;
         [SerializeField] private Color emptySlotLabelColor = new(0.55f, 0.55f, 0.6f, 0.85f);
         [SerializeField] private Font labelFont;
+        [SerializeField, Range(OrbNameFontSizeMin, OrbNameFontSizeMax)] private int orbNameFontSize = 9;
         [Header("Passive countdown (on orb icon)")]
         [SerializeField] private bool showPassiveCountdown = true;
-        [SerializeField, Range(7, 14)] private int passiveCountdownFontSize = 9;
-        [SerializeField] private Vector2 passiveBadgeMaxSize = new(34f, 16f);
+        [SerializeField, Range(PassiveBadgeFontSizeMin, PassiveBadgeFontSizeMax)] private int passiveCountdownFontSize = 7;
+        [SerializeField] private Vector2 passiveBadgeMaxSize = new(30f, 14f);
         [SerializeField, Min(0f)] private float passiveBadgePadding = 2f;
         [SerializeField] private Color passiveBadgeBackingColor = new(0f, 0f, 0f, 0.72f);
         [SerializeField] private Color passiveBadgeTextColor = new(1f, 1f, 1f, 0.95f);
@@ -378,18 +384,21 @@ namespace DungeonGenerator
 
             var prev = GUI.color;
             var font = labelFont != null ? labelFont : GUI.skin.label.font;
+            var nameSize = Mathf.Clamp(orbNameFontSize, OrbNameFontSizeMin, OrbNameFontSizeMax);
+            var badgeSize = Mathf.Clamp(passiveCountdownFontSize, PassiveBadgeFontSizeMin, PassiveBadgeFontSizeMax);
+
             var labelStyle = new GUIStyle(GUI.skin.label)
             {
                 alignment = TextAnchor.UpperCenter,
                 font = font,
-                fontSize = 11
+                fontSize = nameSize
             };
 
             var passiveBadgeStyle = new GUIStyle(GUI.skin.label)
             {
                 alignment = TextAnchor.MiddleCenter,
                 font = font,
-                fontSize = passiveCountdownFontSize,
+                fontSize = badgeSize,
                 fontStyle = FontStyle.Bold,
                 clipping = TextClipping.Clip
             };
