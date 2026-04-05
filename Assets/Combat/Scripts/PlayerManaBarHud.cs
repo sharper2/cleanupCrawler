@@ -20,15 +20,6 @@ namespace DungeonGenerator
 
             if (playerMana == null)
             {
-                var combatController = FindFirstObjectByType<PlayerCombatController>();
-                if (combatController != null)
-                {
-                    playerMana = combatController.GetComponent<ManaComponent>();
-                }
-            }
-
-            if (playerMana == null)
-            {
                 playerMana = FindFirstObjectByType<ManaComponent>();
             }
         }

@@ -85,6 +85,7 @@ namespace DungeonGenerator
                 }
 
                 damageable.TakeDamage(damage);
+                AbilityQueueComponent.NotifyStackDamageFromPlayerHit(context.Player);
             });
         }
 

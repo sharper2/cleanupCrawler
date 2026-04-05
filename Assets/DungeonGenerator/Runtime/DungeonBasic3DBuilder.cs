@@ -131,6 +131,7 @@ namespace DungeonGenerator
             CreateFloorObjects(floorCells, roomCells);
             CreateCeilingObjects(floorCells);
             CreateWallObjects(floorCells);
+            CreateBorderWallObjects();
             if (spawnFloorItems)
                 CreateFloorItemObjects(graph, floorCells, roomCells);
         }
@@ -529,6 +530,35 @@ namespace DungeonGenerator
                         continue;
 
                     var go = CreateTileObject(wallPrefab, "Wall", cell);
+                    go.transform.localScale = new Vector3(cellSize, wallHeight, cellSize);
+                    go.transform.position = CellCenterToWorld(cell, wallHeight * 0.5f);
+
+                    ApplyMaterial(go, material);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Fills the one-cell ring outside <see cref="GeneratorSettings.gridSize"/> with walls so walkable cells
+        /// on the map edge are still enclosed (interior walls only cover non-floor cells inside the grid).
+        /// </summary>
+        private void CreateBorderWallObjects()
+        {
+            int width = Mathf.Max(0, settings.gridSize.x);
+            int height = Mathf.Max(0, settings.gridSize.y);
+            Material material = ResolveMaterial(wallMaterial, fallbackWallColor, ref _generatedWallMaterial, "Generated_DungeonWallMaterial");
+
+            for (int x = -1; x <= width; x++)
+            {
+                for (int y = -1; y <= height; y++)
+                {
+                    if (x >= 0 && x < width && y >= 0 && y < height)
+                    {
+                        continue;
+                    }
+
+                    var cell = new Vector2Int(x, y);
+                    var go = CreateTileObject(wallPrefab, "WallBorder", cell);
                     go.transform.localScale = new Vector3(cellSize, wallHeight, cellSize);
                     go.transform.position = CellCenterToWorld(cell, wallHeight * 0.5f);
 

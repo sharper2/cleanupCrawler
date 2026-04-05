@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace DungeonGenerator
@@ -104,7 +105,8 @@ namespace DungeonGenerator
 
         /// <summary>
         /// Pushes the player up to <paramref name="cellCount"/> cardinal steps away from <paramref name="attackerCell"/>
-        /// (e.g. melee knockback). Stops early if a wall, non-walkable cell, or other occupant blocks the path.
+        /// (e.g. melee knockback). Uses the same stepped motion as normal movement. Stops early if a wall,
+        /// non-walkable cell, or other occupant blocks the path.
         /// </summary>
         public bool TryKnockbackFromSourceCell(Vector2Int attackerCell, int cellCount)
         {
@@ -112,6 +114,14 @@ namespace DungeonGenerator
             {
                 return false;
             }
+
+            StopAllCoroutines();
+            _queuedMove = Vector2Int.zero;
+            _queuedTurn = 0;
+            _isMoving = false;
+            _isTurning = false;
+
+            SnapAnchorToNearestWalkableCell();
 
             if (!_hasCurrentCell && !ResolveCurrentCell())
             {
@@ -124,6 +134,7 @@ namespace DungeonGenerator
                 return false;
             }
 
+            var path = new List<Vector2Int>();
             var candidate = _currentCell;
             for (var step = 0; step < cellCount; step++)
             {
@@ -133,15 +144,44 @@ namespace DungeonGenerator
                     break;
                 }
 
+                path.Add(next);
                 candidate = next;
             }
 
-            if (candidate == _currentCell)
+            if (path.Count == 0)
             {
                 return false;
             }
 
-            return TryTeleportToCell(candidate);
+            StartCoroutine(KnockbackAlongPathRoutine(path));
+            return true;
+        }
+
+        private IEnumerator KnockbackAlongPathRoutine(List<Vector2Int> path)
+        {
+            foreach (var next in path)
+            {
+                yield return MoveToCell(next);
+            }
+        }
+
+        /// <summary>
+        /// After interrupting movement, align logical cell and anchor to the grid cell under the anchor (or nearest resolve).
+        /// </summary>
+        private void SnapAnchorToNearestWalkableCell()
+        {
+            if (dungeonBuilder == null)
+            {
+                return;
+            }
+
+            if (dungeonBuilder.TryWorldToCell(GetAnchorWorldPosition(), out var cell))
+            {
+                _currentCell = cell;
+                _hasCurrentCell = true;
+                SetAnchorWorldPosition(dungeonBuilder.CellCenterToWorld(_currentCell, yOffset));
+                _nextStepAllowedAt = Time.time;
+            }
         }
 
         private bool IsCellValidForKnockbackStep(Vector2Int cell)
@@ -366,6 +406,34 @@ namespace DungeonGenerator
         private void ApplyFacingRotation()
         {
             transform.rotation = Quaternion.Euler(0f, FacingToYaw(_facing), 0f);
+        }
+
+        /// <summary>
+        /// World-space horizontal forward from grid facing (cardinal). Use for attacks/projectiles so direction matches Q/E turns.
+        /// </summary>
+        public Vector3 GetFacingWorldDirection()
+        {
+            return FacingToWorldVector(_facing);
+        }
+
+        private static Vector3 FacingToWorldVector(Vector2Int facing)
+        {
+            if (facing == Vector2Int.right)
+            {
+                return Vector3.right;
+            }
+
+            if (facing == Vector2Int.down)
+            {
+                return Vector3.back;
+            }
+
+            if (facing == Vector2Int.left)
+            {
+                return Vector3.left;
+            }
+
+            return Vector3.forward;
         }
 
         private static float FacingToYaw(Vector2Int facing)

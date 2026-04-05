@@ -89,6 +89,10 @@ namespace DungeonGenerator
             if (health != null)
             {
                 health.TakeDamage(_damage);
+                if (_owner != null)
+                {
+                    AbilityQueueComponent.NotifyStackDamageFromPlayerHit(_owner.gameObject);
+                }
             }
 
             Destroy(gameObject);

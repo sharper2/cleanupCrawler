@@ -6,7 +6,7 @@ namespace DungeonGenerator
 {
     /// <summary>
     /// Orb queue: back on the left (newest pickup), front on the right (next evoke, oldest).
-    /// New orbs enqueue at the back (left). When full, discards the front (right) then adds at the back.
+    /// New orbs enqueue at the back (left). When full, evokes the front (right) like Space, then adds the new orb at the back.
     /// </summary>
     public sealed class AbilityQueueComponent : MonoBehaviour
     {
@@ -28,7 +28,7 @@ namespace DungeonGenerator
         private bool _hasLastPlayerCell;
 
         public event Action QueueChanged;
-        /// <summary>Fired when the front orb was evoked (Space). Not fired for silent discard when picking up while full.</summary>
+        /// <summary>Fired when the front orb was evoked (Space or forced out by a pickup while the queue was full).</summary>
         public event Action<IAbilityQueueItem> FrontOrbEvoked;
 
         private static int _nextOrbInstanceId = 1;
@@ -39,10 +39,41 @@ namespace DungeonGenerator
             public IAbilityQueueItem Item;
             public float TimeAccum;
             public int MoveAccumSinceProc;
+            public float AttackStackDamage;
         }
 
         public int Count => _queue.Count;
         public int MaxSlots => Mathf.Max(1, maxSlots);
+
+        /// <summary>True while evoke invulnerability is active (e.g. shield orb).</summary>
+        public bool IsInvulnerable => Time.unscaledTime < _invulnerableUntilUnscaled;
+
+        private float _invulnerableUntilUnscaled;
+
+        /// <summary>
+        /// Incoming damage multiplier from queued <see cref="IAbilityQueueDamageReductionWhileQueued"/> orbs (1 = none).
+        /// </summary>
+        public float GetQueuedDamageReductionMultiplier()
+        {
+            var totalPercent = 0f;
+            for (var i = 0; i < _queue.Count; i++)
+            {
+                var item = _queue[i].Item;
+                if (item is IAbilityQueueDamageReductionWhileQueued dr)
+                {
+                    totalPercent += dr.DamageReductionPercentWhileQueued;
+                }
+            }
+
+            totalPercent = Mathf.Clamp(totalPercent, 0f, 90f);
+            return (100f - totalPercent) / 100f;
+        }
+
+        /// <summary>Player ignores positive damage until this unscaled time (exclusive of past).</summary>
+        public void SetInvulnerableUntilUnscaled(float unscaledTime)
+        {
+            _invulnerableUntilUnscaled = Mathf.Max(_invulnerableUntilUnscaled, unscaledTime);
+        }
 
         public IAbilityQueueItem GetSlot(int indexFromLeft)
         {
@@ -86,6 +117,25 @@ namespace DungeonGenerator
             return false;
         }
 
+        /// <summary>Attack-stack bonus accumulated while queued (for <see cref="IAbilityQueueAttackStackContributor"/> HUD).</summary>
+        public bool TryGetAttackStackDamageForInstanceId(int instanceId, out float attackStackDamage)
+        {
+            for (var i = 0; i < _queue.Count; i++)
+            {
+                var e = _queue[i];
+                if (e.InstanceId != instanceId)
+                {
+                    continue;
+                }
+
+                attackStackDamage = e.AttackStackDamage;
+                return true;
+            }
+
+            attackStackDamage = 0f;
+            return false;
+        }
+
         private void Awake()
         {
             if (gridPlayer == null)
@@ -100,15 +150,6 @@ namespace DungeonGenerator
 
             if (player == null)
             {
-                var combat = FindFirstObjectByType<PlayerCombatController>();
-                if (combat != null)
-                {
-                    player = combat.gameObject;
-                }
-            }
-
-            if (player == null)
-            {
                 player = gameObject;
             }
 
@@ -119,6 +160,57 @@ namespace DungeonGenerator
             }
 
             _context = new AbilityQueueContext(player, this, resolvedVisuals);
+        }
+
+        /// <summary>
+        /// Increments stack damage for <see cref="IAbilityQueueAttackStackContributor"/> orbs.
+        /// Use <see cref="NotifyStackDamageFromPlayerHit"/> after player-sourced damage to enemies, or call from custom gameplay.
+        /// </summary>
+        public void NotifyPlayerAttackExecuted()
+        {
+            var any = false;
+            for (var i = 0; i < _queue.Count; i++)
+            {
+                var entry = _queue[i];
+                if (entry.Item is IAbilityQueueAttackStackContributor contributor)
+                {
+                    entry.AttackStackDamage += contributor.DamageBonusPerAttack;
+                    any = true;
+                }
+            }
+
+            if (any)
+            {
+                RaiseQueueChanged();
+            }
+        }
+
+        /// <summary>
+        /// Call once per enemy hit after the player deals damage (melee, lightning orb, charged sphere, ranged projectile, etc.).
+        /// Resolves the player's <see cref="AbilityQueueComponent"/> from <paramref name="playerDamageSource"/> (weapon root, camera child, projectile owner, etc.).
+        /// </summary>
+        public static void NotifyStackDamageFromPlayerHit(GameObject playerDamageSource)
+        {
+            if (playerDamageSource == null)
+            {
+                return;
+            }
+
+            if (playerDamageSource.GetComponentInParent<StaticEnemy>() != null)
+            {
+                return;
+            }
+
+            var grid = playerDamageSource.GetComponentInParent<DungeonGridPlayerController>()
+                       ?? playerDamageSource.GetComponent<DungeonGridPlayerController>();
+            if (grid == null)
+            {
+                return;
+            }
+
+            var queue = grid.GetComponent<AbilityQueueComponent>()
+                        ?? grid.GetComponentInChildren<AbilityQueueComponent>(true);
+            queue?.NotifyPlayerAttackExecuted();
         }
 
         private void Update()
@@ -202,7 +294,7 @@ namespace DungeonGenerator
         }
 
         /// <summary>
-        /// Adds an orb at the back of the queue (left). If full, removes the front (right) first (no evoke).
+        /// Adds an orb at the back of the queue (left). If full, evokes the front (right) first, then enqueues.
         /// </summary>
         public bool TryEnqueue(IAbilityQueueItem item)
         {
@@ -213,11 +305,11 @@ namespace DungeonGenerator
 
             if (_queue.Count >= MaxSlots)
             {
-                TryDiscardFrontSilently();
+                TryEvokeFront();
             }
 
             var id = _nextOrbInstanceId++;
-            _queue.Insert(0, new QueuedEntry { InstanceId = id, Item = item });
+            _queue.Insert(0, new QueuedEntry { InstanceId = id, Item = item, AttackStackDamage = 0f });
             RaiseQueueChanged();
             return true;
         }
@@ -247,7 +339,9 @@ namespace DungeonGenerator
             var item = entry.Item;
             FrontOrbEvoked?.Invoke(item);
             _queue.RemoveAt(idx);
+            _context.EvokeAttackStackDamage = entry.AttackStackDamage;
             item.OnEvoked(_context);
+            _context.EvokeAttackStackDamage = 0f;
             RaiseQueueChanged();
             return true;
         }

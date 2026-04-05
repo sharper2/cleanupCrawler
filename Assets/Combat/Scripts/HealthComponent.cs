@@ -34,6 +34,17 @@ namespace DungeonGenerator
                 return;
             }
 
+            var queue = GetComponentInParent<AbilityQueueComponent>() ?? GetComponent<AbilityQueueComponent>();
+            if (queue != null)
+            {
+                if (queue.IsInvulnerable)
+                {
+                    return;
+                }
+
+                amount *= queue.GetQueuedDamageReductionMultiplier();
+            }
+
             _currentHealth = Mathf.Max(0f, _currentHealth - amount);
 
             DamageTaken?.Invoke(amount);

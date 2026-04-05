@@ -47,5 +47,55 @@ namespace DungeonGenerator
             GUI.Label(badgeRect, text, badgeLabelStyle);
             GUI.color = prev;
         }
+
+        /// <summary>
+        /// Total evoke damage preview for stacking orbs (same badge style as passive; bottom-right, or bottom-left if passive uses bottom-right).
+        /// </summary>
+        public static void DrawEvokeDamageStackBadge(
+            Rect iconRect,
+            float evokeDamageTotal,
+            bool passiveBadgeOccupiesBottomRight,
+            Color backingColor,
+            Color textColor,
+            GUIStyle badgeLabelStyle,
+            Vector2 badgeMaxSize,
+            float paddingFromEdges)
+        {
+            if (badgeLabelStyle == null)
+            {
+                return;
+            }
+
+            var text = Mathf.RoundToInt(evokeDamageTotal).ToString();
+            if (string.IsNullOrEmpty(text))
+            {
+                return;
+            }
+
+            var content = new GUIContent(text);
+            var textSize = badgeLabelStyle.CalcSize(content);
+            var bw = Mathf.Min(badgeMaxSize.x, textSize.x + 6f);
+            var bh = Mathf.Min(badgeMaxSize.y, textSize.y + 2f);
+
+            float bx;
+            float by = iconRect.yMax - bh - paddingFromEdges;
+            if (passiveBadgeOccupiesBottomRight)
+            {
+                bx = iconRect.xMin + paddingFromEdges;
+            }
+            else
+            {
+                bx = iconRect.xMax - bw - paddingFromEdges;
+            }
+
+            var badgeRect = new Rect(bx, by, bw, bh);
+
+            var prev = GUI.color;
+            GUI.color = backingColor;
+            GUI.DrawTexture(badgeRect, Texture2D.whiteTexture);
+            GUI.color = textColor;
+            GUI.Label(badgeRect, text, badgeLabelStyle);
+            GUI.color = prev;
+        }
     }
 }

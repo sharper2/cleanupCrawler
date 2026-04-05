@@ -129,7 +129,8 @@ namespace DungeonGenerator
             return true;
         }
 
-        private static Vector3 SnapToGridDirection(Vector3 direction)
+        /// <summary>Matches melee/ranged attack facing: horizontal forward snapped to the nearest cardinal axis.</summary>
+        public static Vector3 SnapToGridDirection(Vector3 direction)
         {
             var flat = new Vector3(direction.x, 0f, direction.z);
             if (flat.sqrMagnitude <= 0.0001f)
@@ -248,6 +249,7 @@ namespace DungeonGenerator
                 }
 
                 damageable.TakeDamage(damage);
+                AbilityQueueComponent.NotifyStackDamageFromPlayerHit(gameObject);
                 TryApplyGridKnockback(damageable, gridKnockbackCells);
                 _activeAttackHasHit = true;
             }

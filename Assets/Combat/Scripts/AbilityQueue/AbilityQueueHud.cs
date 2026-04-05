@@ -5,7 +5,8 @@ namespace DungeonGenerator
 {
     /// <summary>
     /// Empty slot outlines; orbs slide on screen. Front (next evoke) is the rightmost filled slot.
-    /// New orbs join the back (left) and enter from off-screen left into their slot.
+    /// New orbs join the back (left) and enter from off-screen left into their slot, easing in as they arrive.
+    /// Evoked orbs linger and slide off to the right of the bar.
     /// </summary>
     public sealed class AbilityQueueHud : MonoBehaviour
     {
@@ -28,39 +29,60 @@ namespace DungeonGenerator
         [SerializeField] private Color passiveBadgeBackingColor = new(0f, 0f, 0f, 0.72f);
         [SerializeField] private Color passiveBadgeTextColor = new(1f, 1f, 1f, 0.95f);
         [Header("Motion")]
-        [SerializeField, Min(0.01f)] private float slotSlideSpeed = 12f;
+        [Tooltip("Lower = snappier snap-in; higher = softer deceleration into the slot.")]
+        [SerializeField, Min(0.02f)] private float slotSlideSmoothTime = 0.22f;
+        [Tooltip("Caps approach speed in slot-columns per second (visual index space).")]
+        [SerializeField, Min(0.01f)] private float slotSlideMaxSpeed = 14f;
         [SerializeField, Min(0f)] private float newOrbEnterFromLeftOffsetSlots = 2.5f;
         [Header("Evoke feedback")]
         [SerializeField, Min(0f)] private float evokeFlashDuration = 0.28f;
         [SerializeField] private Color evokeIconFlashColor = new(1f, 0.97f, 0.75f, 0.55f);
         [SerializeField, Min(0f)] private float evokedOrbLingerSeconds = 1f;
+        [Tooltip("Linger orb animates to this many slot-columns past the right edge of the bar (index maxSlots).")]
+        [SerializeField, Min(0f)] private float evokedOrbLingerExitOffsetSlots = 1.35f;
 
         private readonly List<TrackedOrb> _tracked = new();
         private readonly HashSet<int> _knownIds = new();
         private readonly List<LingeringEvokedOrb> _linger = new();
-
-        private float _evokeFlashUntil;
-        private float _evokeFlashVisualSlot;
 
         private struct TrackedOrb
         {
             public int InstanceId;
             public IAbilityQueueItem Item;
             public float VisualSlotIndex;
+            public float VisualSlotVelocity;
         }
 
         private struct LingeringEvokedOrb
         {
             public IAbilityQueueItem Item;
             public float VisualSlotIndex;
+            public float VisualSlotVelocity;
             public float RemoveAtTime;
+            /// <summary>Evoke flash overlay on this linger orb until this time (unscaled).</summary>
+            public float FlashUntilTime;
+            /// <summary>SmoothDamp target in slot index space (evoke column or off-screen right).</summary>
+            public float LingerTargetVisualSlot;
+            /// <summary>Used for fade alpha (may differ from default evoke linger).</summary>
+            public float LingerDurationSeconds;
         }
 
         private void Awake()
         {
             if (queue == null)
             {
-                queue = FindFirstObjectByType<AbilityQueueComponent>();
+                var gridPlayer = FindFirstObjectByType<DungeonGridPlayerController>();
+                if (gridPlayer != null)
+                {
+                    queue = gridPlayer.GetComponent<AbilityQueueComponent>()
+                            ?? gridPlayer.GetComponentInChildren<AbilityQueueComponent>(true)
+                            ?? gridPlayer.GetComponentInParent<AbilityQueueComponent>();
+                }
+
+                if (queue == null)
+                {
+                    queue = FindFirstObjectByType<AbilityQueueComponent>();
+                }
             }
 
             if (queue != null)
@@ -95,14 +117,34 @@ namespace DungeonGenerator
                 break;
             }
 
+            var lingerDuration = evokedOrbLingerSeconds;
+            var lingerTarget = maxSlots + evokedOrbLingerExitOffsetSlots;
+            var lingerStart = frontVis;
+            if (item is IAbilityQueueEvokeLingerBehavior lingerBehavior)
+            {
+                lingerDuration = Mathf.Max(0.01f, lingerBehavior.EvokeLingerDurationSeconds);
+                if (lingerBehavior.EvokeLingerStayRightOfHud)
+                {
+                    // Column index maxSlots is immediately right of the bar (slots are 0..maxSlots-1).
+                    lingerTarget = maxSlots;
+                    lingerStart = maxSlots;
+                }
+                else if (lingerBehavior.EvokeLingerStayAtEvokeSlot)
+                {
+                    lingerTarget = frontVis;
+                }
+            }
+
             _linger.Add(new LingeringEvokedOrb
             {
                 Item = item,
-                VisualSlotIndex = frontVis,
-                RemoveAtTime = Time.unscaledTime + evokedOrbLingerSeconds
+                VisualSlotIndex = lingerStart,
+                VisualSlotVelocity = 0f,
+                RemoveAtTime = Time.unscaledTime + lingerDuration,
+                FlashUntilTime = Time.unscaledTime + evokeFlashDuration,
+                LingerTargetVisualSlot = lingerTarget,
+                LingerDurationSeconds = lingerDuration
             });
-            _evokeFlashVisualSlot = frontVis;
-            _evokeFlashUntil = Time.unscaledTime + evokeFlashDuration;
         }
 
         private void WarmStartTrackedOrbs()
@@ -121,7 +163,8 @@ namespace DungeonGenerator
                 {
                     InstanceId = id,
                     Item = queue.GetSlot(i),
-                    VisualSlotIndex = VisualSlotFromQueueIndexRuntime(i, count, queue.MaxSlots)
+                    VisualSlotIndex = VisualSlotFromQueueIndexRuntime(i, count, queue.MaxSlots),
+                    VisualSlotVelocity = 0f
                 });
             }
         }
@@ -174,7 +217,8 @@ namespace DungeonGenerator
                 {
                     InstanceId = id,
                     Item = item,
-                    VisualSlotIndex = startVis
+                    VisualSlotIndex = startVis,
+                    VisualSlotVelocity = 0f
                 });
             }
         }
@@ -188,6 +232,7 @@ namespace DungeonGenerator
 
             ReconcileTrackedItems();
             StepVisualInterpolation();
+            StepLingerVisualInterpolation();
             TickLinger();
         }
 
@@ -255,7 +300,6 @@ namespace DungeonGenerator
             var count = queue.Count;
             var maxSlots = queue.MaxSlots;
             var dt = Time.deltaTime;
-            var speed = slotSlideSpeed;
 
             for (var i = 0; i < _tracked.Count; i++)
             {
@@ -267,8 +311,41 @@ namespace DungeonGenerator
                 }
 
                 var target = VisualSlotFromQueueIndexRuntime(slotInQueue, count, maxSlots);
-                orb.VisualSlotIndex = Mathf.MoveTowards(orb.VisualSlotIndex, target, speed * dt);
+                var vel = orb.VisualSlotVelocity;
+                orb.VisualSlotIndex = Mathf.SmoothDamp(
+                    orb.VisualSlotIndex,
+                    target,
+                    ref vel,
+                    slotSlideSmoothTime,
+                    slotSlideMaxSpeed,
+                    dt);
+                orb.VisualSlotVelocity = vel;
                 _tracked[i] = orb;
+            }
+        }
+
+        private void StepLingerVisualInterpolation()
+        {
+            if (queue == null || _linger.Count == 0)
+            {
+                return;
+            }
+
+            var dt = Time.unscaledDeltaTime;
+
+            for (var i = 0; i < _linger.Count; i++)
+            {
+                var ling = _linger[i];
+                var vel = ling.VisualSlotVelocity;
+                ling.VisualSlotIndex = Mathf.SmoothDamp(
+                    ling.VisualSlotIndex,
+                    ling.LingerTargetVisualSlot,
+                    ref vel,
+                    slotSlideSmoothTime,
+                    slotSlideMaxSpeed,
+                    dt);
+                ling.VisualSlotVelocity = vel;
+                _linger[i] = ling;
             }
         }
 
@@ -330,15 +407,6 @@ namespace DungeonGenerator
             DrawOrbList(_tracked, count, startX, y, slotW, labelStyle, passiveBadgeStyle);
             DrawOrbListLinger(_linger, startX, y, slotW, labelStyle);
 
-            var flashOn = Time.unscaledTime < _evokeFlashUntil;
-            if (flashOn)
-            {
-                var fx = startX + _evokeFlashVisualSlot * slotW;
-                var iconFlashRect = new Rect(fx, y, iconSize.x, iconSize.y);
-                GUI.color = evokeIconFlashColor;
-                GUI.DrawTexture(iconFlashRect, Texture2D.whiteTexture);
-            }
-
             GUI.color = prev;
         }
 
@@ -376,11 +444,28 @@ namespace DungeonGenerator
                     DrawSpriteTinted(orbRect, sprite, 1f);
                 }
 
+                var passiveShown = false;
                 if (showPassiveCountdown && queue.TryGetPassiveCountdownForInstanceId(orb.InstanceId, out var passive))
                 {
+                    passiveShown = passive.HasCountdown;
                     AbilityQueueHudOrbDrawing.DrawPassiveCountdownBadge(
                         orbRect,
                         passive,
+                        passiveBadgeBackingColor,
+                        passiveBadgeTextColor,
+                        passiveBadgeStyle,
+                        passiveBadgeMaxSize,
+                        passiveBadgePadding);
+                }
+
+                if (orb.Item is IAbilityQueueAttackStackContributor stackContributor
+                    && queue.TryGetAttackStackDamageForInstanceId(orb.InstanceId, out var stackDamage))
+                {
+                    var totalDamage = stackContributor.GetEvokeDamageTotal(stackDamage);
+                    AbilityQueueHudOrbDrawing.DrawEvokeDamageStackBadge(
+                        orbRect,
+                        totalDamage,
+                        passiveShown,
                         passiveBadgeBackingColor,
                         passiveBadgeTextColor,
                         passiveBadgeStyle,
@@ -407,7 +492,7 @@ namespace DungeonGenerator
 
                 var vx = startX + ling.VisualSlotIndex * slotW;
                 var orbRect = new Rect(vx, y, iconSize.x, iconSize.y);
-                var fade = Mathf.Clamp01((ling.RemoveAtTime - now) / Mathf.Max(0.01f, evokedOrbLingerSeconds));
+                var fade = Mathf.Clamp01((ling.RemoveAtTime - now) / Mathf.Max(0.01f, ling.LingerDurationSeconds));
 
                 var c = orbBackgroundColor;
                 c.a *= 0.35f + 0.4f * fade;
@@ -417,6 +502,12 @@ namespace DungeonGenerator
                 if (ling.Item.QueueSprite != null)
                 {
                     DrawSpriteTinted(orbRect, ling.Item.QueueSprite, 0.75f + 0.2f * fade);
+                }
+
+                if (now < ling.FlashUntilTime)
+                {
+                    GUI.color = evokeIconFlashColor;
+                    GUI.DrawTexture(orbRect, Texture2D.whiteTexture);
                 }
 
                 var nameRect = new Rect(vx, y + iconSize.y + 2f, iconSize.x, nameHeight);
